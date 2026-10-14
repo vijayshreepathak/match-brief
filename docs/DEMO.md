@@ -14,7 +14,7 @@
 
 ## 1. Open the replay (20 s)
 
-Open the deployed URL.
+Open https://matchbrief.vercel.app/ (the first request after a quiet period can take a few seconds while the server starts).
 
 > "A fan was watching India chase 160 against Pakistan, stepped away, and has
 > just come back. This is a historical replay, not live data, and the label at

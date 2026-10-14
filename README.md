@@ -2,6 +2,10 @@
 
 **Missed a few overs? Understand what changed.**
 
+**Live demo:** [matchbrief.vercel.app](https://matchbrief.vercel.app/), a
+historical replay powered by Google Gemini. It was checked on 2026-10-15; see
+[verification status](#current-verification-status-2026-10-15).
+
 Cricket fans step away during a T20 chase and come back to a different
 scoreboard. Scrolling commentary to work out what happened takes longer than
 the overs they missed. With MatchBrief, the fan says *"I last watched until
@@ -237,7 +241,15 @@ free-tier limits, and write reports to `reports/` (git-ignored).
     answer, and an honest "not in the data" answer.
   - [`docs/VERIFICATION.md`](docs/VERIFICATION.md) has the details, including
     the earlier failing runs and the fixes they led to.
-- **Not deployed yet.** There is no public URL.
+- **Live deployment** ([matchbrief.vercel.app](https://matchbrief.vercel.app/)),
+  checked 2026-10-15:
+  - The site is public: HTTP 200 with no Vercel login. It loads at phone width
+    without horizontal scrolling, and the replay controls work.
+  - A live catch-up and a live extras question both returned accepted Gemini
+    answers, with fact lines rendered by the server.
+  - These first requests took 10.0 s and 6.5 s, slower than locally, probably
+    because the serverless functions were starting up.
+  - The deployed commit (`7a094dc`) matches `main` at the time of the check.
 
 ## Deploy to Vercel
 

@@ -1,19 +1,23 @@
 # Submission
 
-> **Status: NOT READY TO SUBMIT.**
+> **Status: ready to submit, with the caveats below.**
 >
-> - **Gemini is verified locally.** Genuine catch-up and Q&A answers were
->   accepted, the full real suite passed 9 / 11 checks, and the browser check
->   passed.
-> - **Not deployed.** There is no public URL to submit yet.
+> - **The public demo is verified (2026-10-15).** The site loads without a
+>   login, works at phone width, and returned accepted Gemini answers live for
+>   a catch-up and a question.
+> - **Caveats:**
+>   - The full real-Gemini suite passed 9 of 11 checks; both misses were handled
+>     safely.
+>   - Live first responses took about 6–10 s.
+>   - Do a final check on your own phone before submitting.
 >
 > See `docs/VERIFICATION.md`.
 
 ## Working artifact
 
-**Deployed URL:** `[[ PASTE THE VERIFIED VERCEL PRODUCTION URL HERE ]]`
+**Deployed URL:** https://matchbrief.vercel.app/
 
-Source code (optional): `[[ PASTE THE REPOSITORY URL HERE IF YOU SHARE IT ]]`
+Source code: https://github.com/vijayshreepathak/match-brief
 
 ## Note (max 200 words; `npm test` checks the count)
 
@@ -50,9 +54,9 @@ affiliated with Dream11.
       `docs/VERIFICATION.md`.
 - [x] Run `npm run verify:ai:browser` once. Both the catch-up and the question
       must show `Gemini · gemini-3.5-flash-lite`.
-- [ ] Deploy to Vercel (README → Deploy). Open the production URL in an
-      incognito window and on a phone, press **Catch me up**, and confirm the
-      Gemini badge.
-- [ ] Replace the URL placeholder above with the verified production URL.
+- [x] Deploy to Vercel. https://matchbrief.vercel.app/ loads publicly, works
+      at phone width (emulated Pixel 7), and returns accepted Gemini answers.
+      Still worth checking on your own phone.
+- [x] Replace the URL placeholder above with the verified production URL.
 - [ ] In the form, upload a document containing the link and the note above.
 - [ ] If you edit the note, run `npm test`: a test fails above 200 words.

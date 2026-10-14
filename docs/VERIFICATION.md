@@ -13,8 +13,8 @@ provider checks are reported separately.
 | Real Gemini catch-up | **Verified.** Genuine, accepted answers in the smoke and full runs, and in the browser. |
 | Real Gemini Q&A | **Verified.** Factual, extras, completed-match and "not in data" answers were accepted. |
 | Full real suite | **9 / 11 checks passed**. The two misses are listed below. |
-| Public deployment | **NOT DONE**. No public URL. |
-| Submission | **Not ready** until the public demo is deployed and checked. |
+| Public deployment | **Verified.** https://matchbrief.vercel.app/ (see "Live deployment check" below) |
+| Submission | **Ready, with caveats** (9 / 11 full suite; check on your own phone) |
 
 ## Quality gates (mocked, no paid calls)
 
@@ -86,6 +86,29 @@ has unit tests but has not been exercised by a further live run.
   then re-verify.
 - Consider a deterministic rule that forces status `declined` for
   "who won / will win" questions before the chase ends.
+
+## Live deployment check (2026-10-15)
+
+You deployed the app on Vercel from `main` at `7a094dc`. I then checked it
+from this machine, without any login:
+
+| Check | Result |
+| --- | --- |
+| `GET https://matchbrief.vercel.app/` | HTTP 200, title "MatchBrief: catch up on a T20 chase", historical-replay label present, no Vercel login page |
+| Phone width (Playwright, Pixel 7 emulation, fresh cookie-less context) | 0 px horizontal overflow, replay label visible, **Next ball** moved to delivery 111 |
+| `POST /api/catchup` (10.0 → 18.0 ov) | HTTP 200, `mode: ai`, provider `Gemini`, model `gemini-3.5-flash-lite`, not cached, **10.0 s** |
+| `POST /api/ask` "How many extras have been conceded?" | HTTP 200, `mode: ai`, status `answered`, fact line "Extras conceded by Pakistan (as of 18.0 ov): 5 (wides 4, …)", **6.5 s** |
+| `GET /api/replay?seq=110&step=next-over` | HTTP 200, 19.0 ov · 144/4 |
+
+**Latency:** live responses were slower than local ones (about 2 s). These were
+the first requests to the deployment, so serverless start-up is a likely
+cause, but that was not measured.
+
+**Not checked here:**
+
+- **A real phone:** the phone-width check used Pixel 7 emulation.
+- **The Vercel Firewall rate-limit rule:** project settings are not visible
+  from this machine.
 
 ## Earlier history (OpenAI)
 
