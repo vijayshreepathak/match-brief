@@ -66,6 +66,9 @@ Type **"Is Hardik Pandya injured?"** and press **Ask**. The expected status is
 
 ## Optional extras (if time allows)
 
+- **Day / Night** (header button; UI refresh): the whole page switches
+  instantly. The replay position, answers and typed question stay, and no
+  request is made.
 - **Who will win?** The app declines to predict the result before the chase
   ends.
 - **Next ball / Restart.** Earlier answers say they describe 18.0 ov, not the

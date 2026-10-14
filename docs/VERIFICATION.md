@@ -16,6 +16,111 @@ provider checks are reported separately.
 | Public deployment | **Verified.** https://matchbrief.vercel.app/ (see "Live deployment check" below) |
 | Submission | **Ready, with caveats** (9 / 11 full suite; check on your own phone) |
 
+## UI refresh verification (branch `feat/matchbrief-ui-refresh`, 2026-10-15)
+
+This is a presentation-only change, made after submission. The submitted
+version is `main` at `6c0f1b9`, which is what production ran on 2026-10-15.
+The changes:
+
+- a new page layout;
+- day/night themes;
+- polished catch-up, question, evidence and fallback states.
+
+There were no changes to cricket calculations, the Gemini provider, prompts,
+guards, API routes or caching.
+
+### Checks run on the final branch build
+
+| Command | Result |
+| --- | --- |
+| `npm run lint` | pass |
+| `npm run typecheck` | pass |
+| `npm test` | **222 / 222** (unchanged) |
+| `npm run test:e2e` (builds first) | **38 / 38**: the 23 existing tests with **no selector or assertion changes**, plus 15 new UI tests |
+| `npm run verify:ai:browser` (real Gemini, run once on the new UI) | **pass**. Catch-up accepted (4.6 s), extras question accepted (5.6 s), and the injury question answered honestly ("does not contain information about player injuries"). |
+
+The 15 new tests are in `tests/e2e/theme.spec.ts` and
+`tests/e2e/ui-states.spec.ts`. They cover:
+
+- **First visit:** the app follows the device setting, light or dark.
+- **Toggle:** the first click switches the theme in both directions,
+  including from a dark device default (system is not treated as light).
+- **Persistence:** the choice survives a reload, is stored under `theme`, and
+  native controls get `color-scheme: dark`.
+- **No flash:** a stored night choice is already on `<html>` at
+  `DOMContentLoaded`, before hydration.
+- **No state loss:** switching keeps the replay position, the last-seen
+  selection, a half-typed question, the recap and the paused state, and makes
+  **zero `/api/*` requests**.
+- **No unwanted calls or errors:** page load plus theme changes make zero
+  AI requests and log no console or hydration errors.
+- **Night mode:** catch-up, a question, and evidence chips that focus the
+  correct item all work.
+- **Phone widths:** there is no horizontal overflow at 390 px or 320 px in
+  night mode with results open.
+- **Loading and errors:**
+  - the catch-up loading status, network error and "Try again" recovery;
+  - the question error and Retry;
+  - the "Checking the match data…" status;
+  - the disabled Ask button and the character counter.
+- **Replay states:** shown as *Paused*, *Playing replay* or *End of chase*.
+  The page never says "live".
+
+**Test fix during development:** the "checking" status test first reused a
+question that another test had already cached, so the answer arrived
+instantly. It now uses a unique question. No app behaviour changed.
+
+### Visual inspection
+
+Screenshots were taken from the production build with **mocked Gemini**
+(`npm run screenshots`) and inspected at:
+
+- 1366×768, day and night: first viewport, full page, recap and answer with
+  evidence open, and the fallback state;
+- 390×844, day and night: first viewport, full page, and populated;
+- 1440×900, 768×1024 and 320×640, day and night.
+
+**Issues found and fixed during inspection:**
+
+- disabled primary buttons were a faded green, and now use a neutral disabled
+  style;
+- the phone header tagline wrapped onto three or four lines beside the
+  controls, and now has its own row.
+
+At 1366×768 the match summary, the whole replay toolbar (one row), **Catch me
+up** and the question input are all visible without scrolling.
+
+The curated before/after images are in `docs/screenshots/`. "Before" is the
+submitted version at `6c0f1b9`.
+
+### Colour contrast (computed, WCAG 2.x)
+
+| | Day | Night |
+| --- | --- | --- |
+| Body text on page / surface | 16.3 / 17.9 | 16.2 / 14.9 |
+| Secondary text, lowest pairing | 6.1 | 7.1 |
+| Primary button text | 6.5 | 8.3 |
+| Warning, danger and success text on their tints | 7.3 / 6.5 / 8.8 | 9.7 / 8.3 / 9.0 |
+| Control borders (inputs, select, secondary buttons) | 3.7 | 3.8 |
+| Focus ring | 4.2–4.6 | 7.3–7.9 |
+
+All text pairings exceed 4.5:1. Control borders and the focus ring exceed
+3:1. The first palette had 1.9:1 control borders, which were corrected before
+building.
+
+### Known limitations of the UI checks
+
+- **No automated accessibility audit** (axe or Lighthouse) was run. The
+  accessibility claims are limited to what was tested: names, roles, focus,
+  contrast, keyboard use and overflow.
+- **200% zoom** was approximated with narrow viewports (768 / 390 / 320 px),
+  not tested with browser zoom.
+- **Phones were emulated** with Playwright viewports, not real devices.
+- **Dev mode:** next-themes documents a possible theme flash in Next.js dev
+  mode. The no-flash check above is against the production build.
+- **No AI improvements:** the earlier real-Gemini misses (9 / 11 in the full
+  suite) are unchanged, and this redesign does not address them.
+
 ## Quality gates (mocked, no paid calls)
 
 | Command | Result |

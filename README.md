@@ -40,6 +40,17 @@ about the current moment.
   a reason. The `Gemini · <model>` badge appears only on validated output.
 - **Safe with time:** when the replay moves forward, answers keep their "as
   of" label. When it rewinds, they are cleared.
+- **Day and night themes:**
+  - The app follows the device setting on a first visit.
+  - One click switches between day and night, and the choice is remembered.
+  - Switching never resets the replay or makes a request.
+
+## Revisions
+
+| Version | Where | What |
+| --- | --- | --- |
+| Submitted version | `main` at `6c0f1b9`, deployed to production on 2026-10-15 | The app as submitted for the assignment |
+| UI refresh | branch `feat/matchbrief-ui-refresh` (pull request, reviewed before release) | New page layout, day/night themes, and polished catch-up, question and evidence states. Presentation only: cricket logic, the Gemini integration and the API contracts are unchanged. |
 
 ## Demo walkthrough
 
@@ -52,6 +63,21 @@ about the current moment.
 5. Ask **"Is Hardik Pandya injured?"** The answer is *Not in the match data*.
 
 The full script is in [`docs/DEMO.md`](docs/DEMO.md).
+
+## Screenshots (UI refresh)
+
+These are real captures of the production build, made with `npm run
+screenshots`. The AI responses are **mocked**, so the badge shows the model
+as `mock-gemini`.
+
+| Day | Night |
+| --- | --- |
+| ![Desktop, day theme, 1366×768](docs/screenshots/after-desktop-1366-light.jpg) | ![Desktop, night theme, 1366×768](docs/screenshots/after-desktop-1366-dark.jpg) |
+| ![Catch-up and answer with evidence open, day](docs/screenshots/after-desktop-1366-light-populated-full.jpg) | ![Catch-up and answer with evidence open, night](docs/screenshots/after-desktop-1366-dark-populated-full.jpg) |
+| ![Mobile, day, 390×844](docs/screenshots/after-mobile-390-light.jpg) | ![Mobile, night, 390×844](docs/screenshots/after-mobile-390-dark.jpg) |
+
+Before the refresh (submitted version, 1366×768):
+![Desktop before the UI refresh](docs/screenshots/before-desktop-1366-light.jpg)
 
 ## High-level design
 
@@ -166,7 +192,7 @@ sequenceDiagram
 
 | Area | Choices |
 | --- | --- |
-| App | Next.js 16 (App Router, route handlers), React 19, TypeScript 5.9, Tailwind CSS 4 |
+| App | Next.js 16 (App Router, route handlers), React 19, TypeScript 5.9, Tailwind CSS 4 (semantic colour tokens), `next-themes` (day/night), `lucide-react` icons |
 | AI | Google Gemini via the official `@google/genai` SDK (`models.generateContent`), default model `gemini-3.5-flash-lite`, structured JSON output |
 | Validation | Zod 4 for request bodies and model output, plus deterministic guards |
 | Tests | Vitest 5, Playwright 1.64 |
@@ -215,6 +241,7 @@ mock; leave it unset.
 npm run lint && npm run typecheck
 npm test                   # unit tests (Vitest): no network, no key, no paid calls
 npm run test:e2e           # production build + Playwright against a local Gemini mock and a no-key server
+npm run screenshots        # after a build: review screenshots (mocked AI) into docs/screenshots/
 npm run verify:ai:smoke    # opt-in, REAL Gemini: 2 calls (one catch-up, one factual question)
 npm run verify:ai          # opt-in, REAL Gemini: smoke first, then the rest only if smoke passes
 npm run verify:ai:browser  # opt-in, REAL Gemini through the browser UI
@@ -228,6 +255,18 @@ free-tier limits, and write reports to `reports/` (git-ignored).
 
 - **Mocked checks:** lint, typecheck, 222 unit tests and 23 Playwright e2e
   tests pass.
+- **UI refresh** (branch `feat/matchbrief-ui-refresh`): all 23 original e2e
+  tests still pass with no selector changes. 15 new tests cover:
+  - themes: the device default, one-click switching, persistence and no
+    wrong-theme flash;
+  - no state loss and no requests when the theme changes;
+  - evidence focus in night mode;
+  - loading, error and retry states;
+  - no horizontal overflow at 390 px and 320 px;
+  - no console or hydration errors.
+
+  A real-Gemini browser check of the new UI also passed: an accepted catch-up
+  and an accepted question. See [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 - **Real Gemini** (`gemini-3.5-flash-lite`, thinking `minimal`):
   - **Smoke test passed.** A genuine catch-up and a genuine factual question
     were both accepted.
