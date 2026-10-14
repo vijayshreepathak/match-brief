@@ -2,10 +2,10 @@
 
 > **Status: NOT READY TO SUBMIT.**
 >
-> - The app now uses Google Gemini, but **genuine Gemini answers have not been
->   verified yet**: there was no `GEMINI_API_KEY` in `.env.local` when the
->   migration finished.
-> - **Nothing is deployed.**
+> - **Gemini is verified locally.** Genuine catch-up and Q&A answers were
+>   accepted, the full real suite passed 9 / 11 checks, and the browser check
+>   passed.
+> - **Not deployed.** There is no public URL to submit yet.
 >
 > See `docs/VERIFICATION.md`.
 
@@ -41,13 +41,14 @@ affiliated with Dream11.
 
 ## Before you submit (not part of the note)
 
-- [ ] Add `GEMINI_API_KEY` to `.env.local`. Use a key from a dedicated Google
+- [x] Add `GEMINI_API_KEY` to `.env.local`. Use a key from a dedicated Google
       Cloud project.
-- [ ] Run `npm run verify:ai:smoke`. Both cases must be accepted Gemini
+- [x] Run `npm run verify:ai:smoke`. Both cases must be accepted Gemini
       answers.
 - [ ] Run `npm run verify:ai` once. Every `ai_required` and `honest_refusal`
-      case must pass.
-- [ ] Run `npm run verify:ai:browser` once. Both the catch-up and the question
+      case must pass. Last run: 9 / 11, with two Gemini behaviour misses; see
+      `docs/VERIFICATION.md`.
+- [x] Run `npm run verify:ai:browser` once. Both the catch-up and the question
       must show `Gemini · gemini-3.5-flash-lite`.
 - [ ] Deploy to Vercel (README → Deploy). Open the production URL in an
       incognito window and on a phone, press **Catch me up**, and confirm the

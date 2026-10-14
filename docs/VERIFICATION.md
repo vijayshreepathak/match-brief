@@ -1,137 +1,115 @@
 # Verification record
 
-This record covers the OpenAI → Google Gemini migration on 2026-10-15 (IST).
-Every result below comes from a command that was actually run. Mocked tests and
-real-provider checks are reported separately.
+This record covers the OpenAI → Google Gemini migration and the real-Gemini
+verification, both on 2026-10-15 (IST; report file names use UTC). Every
+result below comes from a command that was actually run. Mocked tests and real
+provider checks are reported separately.
 
 ## Overall status
 
 | Requirement | Status |
 | --- | --- |
 | Lint, typecheck, unit tests, build, mocked e2e | **Pass** |
-| Real Gemini catch-up | **NOT VERIFIED.** `.env.local` had no `GEMINI_API_KEY`, so no real Gemini call was made. |
-| Real Gemini Q&A | **NOT VERIFIED** (same reason) |
-| Public deployment | **NOT DONE.** Needs your authorization and a verified key. |
-| Submission | **Not ready**, for the reasons above |
+| Real Gemini catch-up | **Verified.** Genuine, accepted answers in the smoke and full runs, and in the browser. |
+| Real Gemini Q&A | **Verified.** Factual, extras, completed-match and "not in data" answers were accepted. |
+| Full real suite | **9 / 11 checks passed**. The two misses are listed below. |
+| Public deployment | **NOT DONE**. No public URL. |
+| Submission | **Not ready** until the public demo is deployed and checked. |
 
-## Final quality gates
+## Quality gates (mocked, no paid calls)
 
 | Command | Result |
 | --- | --- |
-| `npm run lint` | pass (exit 0) |
-| `npm run typecheck` | pass (exit 0) |
-| `npm test` | **221 / 221 passed**, 10 files. No network, no key, no paid calls. |
-| `npm run test:e2e` (runs `next build` first) | build OK; **23 / 23 passed**: 20 desktop (Gemini mock), 2 no-key, 1 mobile |
-| `npm audit --omit=dev` | **0 vulnerabilities**, with `@google/genai` installed |
-| `npm audit` | 5 high, all in one dev-only `braces` chain (unchanged; see `docs/DECISIONS.md` §17) |
-| `git diff --check` | clean |
-| `npm run verify:ai:smoke` / `verify:ai` / `verify:ai:browser` (real Gemini) | **NOT RUN**: no `GEMINI_API_KEY` |
+| `npm run lint` | pass |
+| `npm run typecheck` | pass |
+| `npm test` | **222 / 222 passed** |
+| `npm run test:e2e` (runs `next build` first) | build OK, **23 / 23 passed** (Gemini mock, no-key server, mobile) |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| `npm audit` | 5 high, all in one dev-only `braces` chain (see `docs/DECISIONS.md` §17) |
 
-`npm run build` was not run separately, because `test:e2e` runs `next build`
-first.
+## Real Gemini runs
 
-## How the Gemini path was tested without a key
+**Configuration:**
 
-These tests exercise the production code path, **not** the real model.
+- Model: `gemini-3.5-flash-lite`.
+- Thinking level: `minimal`.
+- Endpoint: `generativelanguage.googleapis.com`.
+- Key: read from `.env.local` and never printed.
+- Every report has `realGemini: true`.
 
-**Unit tests** use the real `@google/genai` 2.29.1 SDK with an injected fake
-`fetch`. They confirm:
+Each run was executed once. When a run failed, the cause was diagnosed and
+fixed before anything was run again; no run was repeated in the hope of a
+lucky pass.
 
-- the exact request the SDK sends: `contents`, `systemInstruction`,
-  `generationConfig.responseMimeType`, `responseJsonSchema` (no `$schema`),
-  `maxOutputTokens: 1500` and `thinkingConfig.thinkingLevel: "MINIMAL"`, with
-  the key sent in the `x-goog-api-key` header and no tools;
-- parsing and usage (prompt, candidate and thought tokens);
-- each failure class:
+| Run (report, UTC) | Command | Result | What happened |
+| --- | --- | --- | --- |
+| A `19-37-55` | `verify:ai:smoke` | 1 / 2 | Catch-up accepted (2.5 s). The required-rate question was **rejected**: Gemini wrote the number word "twelve". **Fix:** stronger words-only prompt with a numeric-question example (prompt version `2026-10-15.3`). |
+| B `19-39-04` | `verify:ai:smoke` | **2 / 2** | Catch-up accepted (2.6 s, 5,862 in / 380 out tokens). Required-rate question accepted (1.3 s). |
+| C `19-39-31` | `verify:ai` | smoke 1 / 2, rest skipped | The catch-up was **rejected** with "too many references in one point": Gemini cited more deliveries than the old cap of 8. The window contains 10 boundaries. **Fix:** caps raised to 8 facts / 16 deliveries per point; each one is still validated. The smoke gate correctly skipped the other 9 cases. |
+| D `19-40-52` | `verify:ai` | **9 / 11** | See the table below. |
+| Browser | `verify:ai:browser` | **pass** | Catch-up settled in 2.5 s with the `Gemini · gemini-3.5-flash-lite` badge, the correct as-of label, and an evidence chip that opened its item. The extras question was answered in 1.9 s with the F_EXTRAS fact line. The injury question returned "not available in the supplied match data". Screenshots: `reports/real-gemini-*.png` (not committed). |
 
-| Failure | How it was simulated |
-| --- | --- |
-| Invalid key | 400 `API_KEY_INVALID`, and 401 |
-| Depleted prepay balance | 402 |
-| Model unavailable | 404 / 403 |
-| Daily quota | 429 with a `PerDay` quota ID; not retried |
-| Per-minute rate limit | 429; retried once after `retryDelay`, or not retried if the delay doesn't fit the deadline |
-| Server error | 503; retried once only |
-| Timeout | the request never answers |
-| Bad request | 400 |
-| Deadline exceeded | 504 |
-| Safety block | prompt blocked, or a SAFETY finish reason |
-| Cut-off output | `MAX_TOKENS` |
-| Empty response | no candidates, or blank text |
-| Malformed JSON | invalid JSON in the response |
-| Schema mismatch | valid JSON that fails the schema |
+### Run D in detail
 
-They also cover:
+| Case | Result | Latency | Tokens (in / out) | Outcome |
+| --- | --- | --- | --- | --- |
+| normal-catchup (smoke) | genuine Gemini, grounding accepted | 1.85 s | 5,862 / 301 | pass |
+| chase-calculation (smoke) | genuine Gemini, accepted | 1.29 s | 6,943 / 77 | pass |
+| wicket-heavy | **fallback**, `ungrounded_output` | 2.06 s | 5,375 / 428 | **fail**: Gemini wrote "four wickets". The guard rejected it and the fan saw a labelled fallback. |
+| extras-question | genuine Gemini, accepted | 1.49 s | 7,630 / 141 | pass |
+| completed-chase | genuine Gemini, accepted | 1.60 s | 8,326 / 60 | pass |
+| unknown-injury | genuine Gemini, `not_in_data` | 1.13 s | 7,628 / 53 | pass |
+| no-ball-cause | genuine Gemini, `not_in_data` | 1.11 s | 7,959 / 52 | pass |
+| future-winner | genuine Gemini, but status `answered` | 1.20 s | 7,622 / 57 | **fail on status only**. The text was honest ("The result is not known at this checkpoint as the chase is still in progress."), but it was tagged `answered` instead of `declined` / `not_in_data`. |
+| ignore-context-injection | genuine Gemini, `declined` | 1.08 s | 6,363 / 41 | pass |
+| unchanged-checkpoint | no model call (`no_change`) | n/a | n/a | pass |
+| deliberate timeout | fallback, `timeout` | n/a | n/a | pass |
 
-- config: the default model, explicit `GEMINI_API_KEY` only (`GOOGLE_API_KEY`
-  and `OPENAI_API_KEY` are ignored), and thinking levels validated per model;
-- the JSON Schema using only keywords Gemini documents;
-- cache keys isolated by provider and config, with cached answers keeping the
-  original provider, model and timestamp.
+**Latency** for accepted calls: catch-ups took about 1.9–2.6 s and questions
+about 1.1–1.6 s. Gemini reported no thinking tokens at `minimal`.
 
-**E2E tests** run `next start`, pointed through the real SDK at
-`tests/e2e/mock-gemini.mjs`. They show:
+**Normal-case fallbacks:** one catch-up in run D (number words) and one in run
+C (reference cap, since fixed). Both were shown as "Rule-based fallback" with
+a reason, never as Gemini.
 
-- the `Gemini · mock-gemini` badge appears only for accepted answers;
-- safety, quota and empty responses give labelled fallbacks;
-- invalid evidence is rejected;
-- stale and rewind handling, double-click dedupe and autoplay all still work;
-- the no-key server still serves the fallback.
+### Change made after the live runs (not yet re-verified live)
 
-**Harness dry run.** `verify:ai` and `verify:ai:smoke` were also run against
-the mock through a scratch env file, to check the harness wiring:
+The browser screenshot showed a real catch-up at 18.0 ov saying "as the batting
+side **chased down** the target". That phrase hints at the result. The spoiler
+guard now rejects "chased (the target) down" and "knocked off the runs/target"
+while the chase is in progress. This change only makes acceptance stricter. It
+has unit tests but has not been exercised by a further live run.
 
-- the env loader works;
-- the run is labelled "CUSTOM ENDPOINT: not a real Gemini verification";
-- the smoke test failed on the mock's generic answer, so the 9 remaining cases
-  were **skipped**, as intended;
-- the report fields are filled in.
+### Suggested follow-ups (not done)
 
-Afterwards the dry-run reports were deleted. Mock rows can never be labelled
-"genuine Gemini".
-
-## Real Gemini verification: pending
-
-Once `GEMINI_API_KEY` is in `.env.local`:
-
-1. Run `npm run verify:ai:smoke`. This makes 2 real calls: one catch-up and
-   one factual question.
-2. If both are accepted, run `npm run verify:ai` once. It reruns the smoke
-   test, then runs 8 more model cases, 1 no-call case and 1 deliberate
-   timeout, spaced 4.5 s apart.
-3. Run `npm run verify:ai:browser` once. It covers catch-up with an evidence
-   click, an extras question, and an injury question.
-
-Record the results here. If you see 429 `RESOURCE_EXHAUSTED`, check the
-project's free-tier limits in Google AI Studio.
+- If number-word rejections stay frequent, try `GEMINI_THINKING_LEVEL=low`,
+  then re-verify.
+- Consider a deterministic rule that forces status `declined` for
+  "who won / will win" questions before the chase ends.
 
 ## Earlier history (OpenAI)
 
 Before the migration, the OpenAI key was valid, but every generation request
-returned 429 `insufficient_quota` / `credit_balance_exhausted`. That run
-produced 0 / 9 accepted answers, all correctly labelled fallbacks. OpenAI is no
-longer used: the SDK is uninstalled and `OPENAI_*` variables are ignored.
+returned 429 `insufficient_quota`. That run produced 0 / 9 accepted answers,
+all correctly labelled fallbacks. The OpenAI SDK has been removed, and
+`OPENAI_*` variables are ignored.
 
 ## Security and readiness checks
 
-- **Browser bundles:** client bundles (`.next/static`) contain no
-  `GEMINI_API_KEY`, `GEMINI_MODEL`, Gemini endpoint, `@google/genai` or
-  `x-goog-api-key`. The SDK appears only in a server chunk, and
-  `gemini.server.ts` starts with `import "server-only"`.
-- **Public variables:** there are no `NEXT_PUBLIC_` variables.
-- **Tracked files:** no `.env.local`, report or test-result files are tracked.
-  `.env.local` is git-ignored.
-- **Error details:** responses carry only a fallback reason code. Server logs
-  carry the HTTP status, RPC status, reason and quota ID, never provider
-  message bodies or keys.
+- **Browser bundles:** no Gemini key, endpoint, SDK or `x-goog-api-key`
+  appears in `.next/static`. The SDK is only in a server chunk, and
+  `gemini.server.ts` is `server-only`.
+- **Variables and tracked files:** there are no `NEXT_PUBLIC_` variables.
+  `.env.local`, `reports/` and `test-results/` are git-ignored and not
+  tracked.
+- **What gets exposed:** responses carry only a fallback reason code. Logs
+  carry status and quota IDs, never provider bodies or keys.
 - **Request validation:** malformed or oversized requests, and requests that
-  name a model, token limit or "facts", are rejected (400/413) before any
-  provider call.
-- **Builds without credentials:** the build and all tests passed with no key
-  present. The client is created lazily.
+  name a model or token limit, are rejected before any provider call.
+- **Builds without a key:** the build and every mocked test pass with no key
+  present.
 
 ## Submission note
 
-**168 words** (limit 200), counted with `wc -w` between the note markers. It is
-enforced by `tests/unit/submission.test.ts`, which also checks that the note
-names Gemini and no longer mentions OpenAI.
+The note is **168 words** (limit 200), enforced by
+`tests/unit/submission.test.ts`.
