@@ -19,8 +19,10 @@ const LIMITS = {
   noteWords: 40,
   catchUpNoteWords: 120,
   answerWords: 70,
-  maxFactsPerPoint: 6,
-  maxEventsPerPoint: 8,
+  // Sanity bounds, not grounding checks: every cited fact and delivery is still validated.
+  // Sized so a point can cite every boundary in a typical window (10 in overs 11-18).
+  maxFactsPerPoint: 8,
+  maxEventsPerPoint: 16,
 };
 
 function words(text: string): number {
@@ -56,6 +58,9 @@ const RESULT_CLAIM = new RegExp(
     String.raw`\bhome and dry\b`,
     String.raw`\b(?:seal|clinch)(?:s|es|ed)?\b`,
     String.raw`\bwinning runs?\b`,
+    // Past-tense completion phrases ("chased down the target") imply the result.
+    String.raw`\bchased (?:it |them |the (?:target|total|runs) )?down\b`,
+    String.raw`\b(?:knocked|knocks) off the (?:target|runs|total)\b`,
     String.raw`\bfinal (?:score|result|total)\b`,
     String.raw`\b(?:player|man) of the match\b`,
   ].join("|"),
@@ -92,7 +97,7 @@ interface PointRules {
 
 function checkPoint(p: ModelPoint, ctx: ModelContext, rules: PointRules): Problem {
   if (p.fact_ids.length > LIMITS.maxFactsPerPoint || p.events.length > LIMITS.maxEventsPerPoint) {
-    return { reason: "invalid_output", detail: "too many references in one point" };
+    return { reason: "invalid_output", detail: `too many references in one point (${p.fact_ids.length} facts, ${p.events.length} deliveries)` };
   }
   if (rules.needsEvidence && p.fact_ids.length + p.events.length === 0) {
     return { reason: "invalid_evidence", detail: "claim has no supporting fact or delivery" };

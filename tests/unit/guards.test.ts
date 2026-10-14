@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { endOfOver } from "@/lib/cricket/engine";
-import { buildModelContext } from "@/lib/ai/context";
+import { buildModelContext, eventKinds } from "@/lib/ai/context";
 import { prematureResultClaims, validateAnswer, validateCatchUp, writtenNumbers } from "@/lib/ai/guards";
 import type { AnswerOutput, CatchUpOutput } from "@/lib/ai/prompts";
 import { loadChase } from "../support/fixture";
@@ -118,6 +118,19 @@ describe("grounding regressions", () => {
     expect(validateAnswer(answer({ answer: "They need runs." }), askCtx)).toMatchObject({ reason: "invalid_evidence" });
   });
 
+  it("accepts a point citing every boundary in the window, but bounds the number of references", () => {
+    // Overs 11-18 contain 10 boundaries; Gemini cited all of them in a real run.
+    const all = [...ctx.factsById.get("F_INT_BOUNDARIES")!.eventIds];
+    const events = all.map((id) => ({ id, kind: ["E67", "E70", "E72"].includes(id) ? ("six" as const) : ("four" as const) }));
+    expect(events).toHaveLength(10);
+    const ok = goodRecap({ what_changed: [{ note: "Boundaries flowed in this spell.", fact_ids: ["F_INT_BOUNDARIES"], events }] });
+    expect(validateCatchUp(ok, ctx).ok).toBe(true);
+    const tooMany = goodRecap({
+      what_changed: [{ note: "Every ball mattered.", fact_ids: [], events: ctx.deliveries.slice(0, 17).map((d) => ({ id: d.id, kind: eventKinds(d)[0] })) }],
+    });
+    expect(validateCatchUp(tooMany, ctx)).toMatchObject({ ok: false, reason: "invalid_output", detail: expect.stringContaining("17 deliveries") });
+  });
+
   it("rejects overlong or empty output", () => {
     expect(validateCatchUp(goodRecap({ headline: "word ".repeat(20) }), ctx)).toMatchObject({ reason: "invalid_output" });
     expect(validateCatchUp(goodRecap({ what_changed: [] }), ctx)).toMatchObject({ reason: "invalid_output" });
@@ -132,6 +145,9 @@ describe("result spoilers before the chase ends", () => {
       "Kohli goes on to win it for India.",
       "India seal it in the last over.",
       "Kohli was player of the match.",
+      // Seen in a real Gemini catch-up at 18.0 ov:
+      "More boundaries followed as the batting side chased down the target.",
+      "India knocked off the runs.",
     ]) {
       expect(prematureResultClaims(text, false), text).toHaveLength(1);
     }
@@ -145,6 +161,7 @@ describe("result spoilers before the chase ends", () => {
       "I can't predict whether India will win.",
       "The result isn't known yet.",
       "India still need a strong finish to win.",
+      "India are chasing down a big target.",
     ]) {
       expect(prematureResultClaims(text, false), text).toHaveLength(0);
     }
