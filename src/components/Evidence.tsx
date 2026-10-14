@@ -1,10 +1,12 @@
 "use client";
 
+import { ChevronDown, CircleDot, Hash } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { EvidenceItem } from "@/lib/ai/types";
 import type { EventView } from "@/lib/match/view";
 
-// Evidence chips under each claim, and an expandable panel that shows what a chip refers to.
+// Evidence chips under each claim, and an inline disclosure showing what a chip refers to.
+// Each response owns its own evidence map, so an older answer's evidence is never mixed in.
 
 export function EvidenceChips({
   ids,
@@ -17,10 +19,11 @@ export function EvidenceChips({
 }) {
   if (ids.length === 0) return null;
   return (
-    <span className="mt-1 flex flex-wrap gap-1.5">
+    <span className="mt-2 flex flex-wrap gap-1.5">
       {ids.map((id) => {
         const item = evidence[id];
         if (!item) return null;
+        const Icon = item.kind === "event" ? CircleDot : Hash;
         return (
           <button
             key={id}
@@ -28,8 +31,9 @@ export function EvidenceChips({
             onClick={() => onSelect(id)}
             data-evidence-chip={id}
             aria-label={`Show evidence: ${item.title}`}
-            className="rounded-full border border-emerald-700/30 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
+            className="inline-flex min-h-8 items-center gap-1 rounded-full border border-success-border bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary-soft-foreground transition-colors duration-150 hover:border-primary"
           >
+            <Icon aria-hidden className="size-3" />
             {item.chip}
           </button>
         );
@@ -82,18 +86,19 @@ export function EvidencePanel({
   useEffect(() => {
     if (!open || !focusId) return;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-evidence-item="${focusId}"]`);
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // Smooth scrolling only when the fan has not asked for reduced motion.
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
     el?.focus({ preventScroll: true });
   }, [open, focusId, nonce]);
 
   return (
-    <details
-      open={open}
-      onToggle={(e) => onToggle(e.currentTarget.open)}
-      className="rounded-xl border border-slate-200 bg-slate-50"
-    >
-      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-slate-800">
-        Evidence ({items.length} cited{windowEvents ? ` · ${windowEvents.length} deliveries in window` : ""})
+    <details open={open} onToggle={(e) => onToggle(e.currentTarget.open)} className="group rounded-xl border border-border bg-surface-muted">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-foreground select-none [&::-webkit-details-marker]:hidden">
+        <span>
+          Evidence ({items.length} cited{windowEvents ? ` · ${windowEvents.length} deliveries in window` : ""})
+        </span>
+        <ChevronDown aria-hidden className="size-4 shrink-0 text-muted transition-transform duration-150 group-open:rotate-180" />
       </summary>
       <div ref={listRef} className="space-y-3 px-3 pb-3" id={`${scope}-evidence`}>
         <ul className="space-y-1.5">
@@ -104,30 +109,30 @@ export function EvidencePanel({
               data-evidence-item={item.id}
               aria-current={focusId === item.id ? "true" : undefined}
               className={`rounded-lg border px-3 py-2 text-sm outline-none ${
-                focusId === item.id ? "border-emerald-600 bg-emerald-50 ring-2 ring-emerald-600/40" : "border-slate-200 bg-white"
+                focusId === item.id ? "border-primary bg-primary-soft ring-2 ring-primary/40" : "border-border bg-surface"
               }`}
             >
-              <p className="font-medium text-slate-900">
-                <span className="mr-2 rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[11px] text-slate-700">{item.id}</span>
+              <p className="font-semibold text-foreground">
+                <span className="mr-2 rounded border border-border bg-surface-muted px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted">
+                  {item.id}
+                </span>
                 {item.title}
               </p>
-              <p className="mt-0.5 break-words text-slate-700">{item.detail}</p>
+              <p className="mt-0.5 break-words text-foreground tabular-nums">{item.detail}</p>
             </li>
           ))}
         </ul>
         {windowEvents && windowEvents.length > 0 && (
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Every delivery in this window
-            </h4>
-            <ol className="mt-1 max-h-64 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 text-xs">
+            <h4 className="text-xs font-semibold text-muted">Every delivery in this window</h4>
+            <ol className="mt-1 max-h-72 space-y-0.5 overflow-y-auto rounded-lg border border-border bg-surface p-2 text-xs">
               {windowEvents.map((e) => (
                 <li
                   key={e.id}
-                  className={`flex gap-2 rounded px-1 py-0.5 ${evidence[e.id] ? "bg-emerald-50 font-medium" : ""}`}
+                  className={`flex gap-2 rounded px-1.5 py-1 ${evidence[e.id] ? "bg-primary-soft font-semibold text-primary-soft-foreground" : "text-foreground"}`}
                 >
-                  <span className="w-10 shrink-0 font-mono text-slate-500">{e.ballLabel}</span>
-                  <span className="min-w-0 break-words text-slate-800">
+                  <span className="w-10 shrink-0 font-mono text-muted tabular-nums">{e.ballLabel}</span>
+                  <span className="min-w-0 break-words">
                     {e.bowler} to {e.batter}: {e.description}
                   </span>
                 </li>

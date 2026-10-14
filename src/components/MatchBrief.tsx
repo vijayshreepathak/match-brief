@@ -7,7 +7,9 @@ import { RequestAborted, fetchReplay, postJson } from "@/lib/client/api";
 import type { ReplayView } from "@/lib/match/view";
 import { AskPanel, type QaItem } from "./AskPanel";
 import { CatchUpPanel, type RecapState } from "./CatchUpPanel";
+import { ReplayToolbar } from "./ReplayToolbar";
 import { Scoreboard } from "./Scoreboard";
+import { card } from "./ui";
 
 const PLAY_INTERVAL_MS = 1_200;
 const MAX_ANSWERS = 4;
@@ -159,73 +161,36 @@ export function MatchBrief({ initialView, initialLastSeenSeq }: { initialView: R
     }
   }
 
-  const atStart = view.viewing.seq === 0;
-  const btn =
-    "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50";
-
-  // Mobile order: score, catch-up, ask. Desktop: score + ask on the left, catch-up on the right.
+  // Match summary and replay toolbar on top; catch-up (7/12) and questions (5/12) below.
+  // DOM order matches the mobile order: summary, controls, catch-up, questions.
   return (
-    <main className="mx-auto grid w-full max-w-6xl items-start gap-5 px-4 pb-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-[auto_1fr]">
-      <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">
+    <main className="mx-auto w-full max-w-6xl flex-1 space-y-4 px-4 py-4">
+      <section aria-labelledby="score-heading" className={card}>
         <Scoreboard view={view} />
-
-        <section aria-labelledby="replay-heading" className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 id="replay-heading" className="text-sm font-semibold uppercase tracking-wide text-slate-600">
-            Replay controls
-          </h2>
-          <div role="group" aria-label="Replay controls" className="mt-2 flex flex-wrap gap-2">
-            <button type="button" className={btn} onClick={() => manualStep("start")} disabled={nav.busy || atStart}>
-              Restart
-            </button>
-            <button type="button" className={btn} onClick={() => manualStep("prev-over")} disabled={nav.busy || atStart}>
-              Back 1 over
-            </button>
-            <button
-              type="button"
-              className={`${btn} min-w-20`}
-              aria-pressed={playing}
-              onClick={() => setPlaying((p) => !p)}
-              disabled={!view.canAdvance}
-            >
-              {playing ? "Pause" : "Play"}
-            </button>
-            <button type="button" className={btn} onClick={() => manualStep("next-ball")} disabled={nav.busy || !view.canAdvance}>
-              Next ball
-            </button>
-            <button type="button" className={btn} onClick={() => manualStep("next-over")} disabled={nav.busy || !view.canAdvance}>
-              Next over
-            </button>
-          </div>
-          <p className="mt-2 text-sm text-slate-700" aria-live="polite" data-testid="replay-position">
-            Replay position: {view.viewing.label}
-            {view.viewing.seq > 0 ? ` (delivery ${view.viewing.seq})` : ""}
-            {!view.canAdvance ? " · end of chase" : ""}
-          </p>
-          {nav.error && (
-            <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-900">
-              <span>Could not move the replay: {nav.error}</span>
-              {nav.failedStep && (
-                <button type="button" className="rounded border border-red-300 px-2 py-0.5 font-medium" onClick={() => manualStep(nav.failedStep!)}>
-                  Retry
-                </button>
-              )}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <div className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-        <CatchUpPanel
+        <ReplayToolbar
           view={view}
-          lastSeenSeq={lastSeenSeq}
-          onLastSeenChange={setLastSeenSeq}
-          recap={recap}
-          onCatchUp={() => void catchUp()}
+          playing={playing}
+          busy={nav.busy}
+          error={nav.error}
+          failedStep={nav.failedStep}
+          onStep={manualStep}
+          onTogglePlay={() => setPlaying((p) => !p)}
         />
-      </div>
+      </section>
 
-      <div className="min-w-0 lg:col-start-1 lg:row-start-2">
-        <AskPanel view={view} items={answers} busy={askBusy} notice={askNotice} onAsk={(q) => void ask(q)} />
+      <div className="grid items-start gap-4 lg:grid-cols-12">
+        <div className="min-w-0 lg:col-span-7">
+          <CatchUpPanel
+            view={view}
+            lastSeenSeq={lastSeenSeq}
+            onLastSeenChange={setLastSeenSeq}
+            recap={recap}
+            onCatchUp={() => void catchUp()}
+          />
+        </div>
+        <div className="min-w-0 lg:col-span-5">
+          <AskPanel view={view} items={answers} busy={askBusy} notice={askNotice} onAsk={(q) => void ask(q)} />
+        </div>
       </div>
     </main>
   );
