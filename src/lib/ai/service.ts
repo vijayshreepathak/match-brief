@@ -3,7 +3,7 @@ import { buildModelContext, type ModelContext } from "./context";
 import { fallbackAnswer, fallbackRecap, noChangeRecap } from "./fallback";
 import { validateAnswer, validateCatchUp, type GuardResult } from "./guards";
 import { BoundedCache, FixedWindowLimiter } from "./limits";
-import { ProviderError, type StructuredModel } from "./model";
+import { ProviderError, type ProviderFailure, type StructuredModel } from "./model";
 import {
   ASK_INSTRUCTIONS,
   AnswerOutputSchema,
@@ -25,7 +25,18 @@ import type {
 // validate checkpoints -> build context on the server -> cache / rate limit ->
 // model call -> guards -> either validated AI output or a labelled rule-based fallback.
 
-type Outcome<T> = { ok: true; value: T; model: string } | { ok: false; reason: FallbackReason; detail: string };
+type Outcome<T> =
+  | { ok: true; value: T; model: string; generatedAt: string }
+  | { ok: false; reason: FallbackReason; detail: string };
+
+const PROVIDER_REASONS: Record<ProviderFailure, FallbackReason> = {
+  timeout: "timeout",
+  provider_error: "provider_error",
+  provider_rate_limited: "provider_rate_limited",
+  invalid_output: "invalid_output",
+  refusal: "model_refusal",
+  incomplete: "incomplete_output",
+};
 
 export interface AiDeps {
   model: StructuredModel | null;
@@ -102,10 +113,10 @@ async function runModel<T>(
     try {
       const result = await call(model);
       if (!result.ok) return { ok: false, reason: result.reason, detail: result.detail };
-      return { ok: true, value: result.value, model: result.model ?? model.model };
+      return { ok: true, value: result.value, model: result.model ?? model.model, generatedAt: new Date().toISOString() };
     } catch (error) {
       if (error instanceof ProviderError) {
-        return { ok: false, reason: error.kind, detail: error.message };
+        return { ok: false, reason: PROVIDER_REASONS[error.kind], detail: error.message };
       }
       return { ok: false, reason: "provider_error", detail: "unexpected error" };
     }
@@ -132,7 +143,7 @@ export async function runCatchUp(
 
   if (!ctx.interval) {
     const recap = noChangeRecap(chase, ctx);
-    return { ...base, mode: "no_change", model: null, fallbackReason: null, recap, evidence: resolveEvidence(ctx, recapIds(recap)), cached: false };
+    return { ...base, mode: "no_change", model: null, fallbackReason: null, generatedAt: null, recap, evidence: resolveEvidence(ctx, recapIds(recap)), cached: false };
   }
 
   const key = cacheKey({ fixtureVersion: chase.fixtureVersion, model: deps.model?.model ?? "", op: "catchup", ...request });
@@ -147,11 +158,11 @@ export async function runCatchUp(
   });
 
   if (outcome.ok) {
-    return { ...base, mode: "ai", model: outcome.model, fallbackReason: null, recap: outcome.value, evidence: resolveEvidence(ctx, recapIds(outcome.value)), cached: outcome.cached };
+    return { ...base, mode: "ai", model: outcome.model, fallbackReason: null, generatedAt: outcome.generatedAt, recap: outcome.value, evidence: resolveEvidence(ctx, recapIds(outcome.value)), cached: outcome.cached };
   }
   deps.log?.(`catchup fallback: ${outcome.reason} (${outcome.detail})`);
   const recap = fallbackRecap(chase, ctx);
-  return { ...base, mode: "fallback", model: null, fallbackReason: outcome.reason, recap, evidence: resolveEvidence(ctx, recapIds(recap)), cached: false };
+  return { ...base, mode: "fallback", model: null, fallbackReason: outcome.reason, generatedAt: null, recap, evidence: resolveEvidence(ctx, recapIds(recap)), cached: false };
 }
 
 export async function runAsk(
@@ -171,13 +182,13 @@ export async function runAsk(
       instructions: ASK_INSTRUCTIONS,
       input: buildModelInput(ctx.payload, question),
     });
-    return { ...validateAnswer(parsed, ctx, question), model: used };
+    return { ...validateAnswer(parsed, ctx), model: used };
   });
 
   if (outcome.ok) {
-    return { ...base, mode: "ai", model: outcome.model, fallbackReason: null, answer: outcome.value, evidence: resolveEvidence(ctx, outcome.value.evidence), cached: outcome.cached };
+    return { ...base, mode: "ai", model: outcome.model, fallbackReason: null, generatedAt: outcome.generatedAt, answer: outcome.value, evidence: resolveEvidence(ctx, outcome.value.evidence), cached: outcome.cached };
   }
   deps.log?.(`ask fallback: ${outcome.reason} (${outcome.detail})`);
   const answer = fallbackAnswer(question, ctx);
-  return { ...base, mode: "fallback", model: null, fallbackReason: outcome.reason, answer, evidence: resolveEvidence(ctx, answer.evidence), cached: false };
+  return { ...base, mode: "fallback", model: null, fallbackReason: outcome.reason, generatedAt: null, answer, evidence: resolveEvidence(ctx, answer.evidence), cached: false };
 }

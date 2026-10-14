@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "next build && playwright test",
     "verify:ai": "vitest run --config vitest.live.config.mts",
-    "data:import": "node scripts/import-cricsheet.mjs"
+    "data:import": "node scripts/import-cricsheet.mjs",
+    "verify:ai:browser": "next build && playwright test --config playwright.live.config.ts"
   },
   "dependencies": {
     "next": "16.4.0",

@@ -9,6 +9,35 @@
     "created": "2022-10-27",
     "revision": 2
   },
-  "obtainedVia": "cricsheet.org served a browser-verification page to scripted downloads on 2026-10-14, so the unmodified Cricsheet file was taken from five independent public GitHub mirrors whose copies were byte-identical (same SHA-256). Replace it with a browser download from cricsheet.org using `npm run data:import -- <path-to-1298150.json>`.",
-  "retrieved": "2026-10-14"
+  "obtainedVia": "cricsheet.org served a browser-verification page to scripted downloads (2026-10-14 and 2026-10-15), so the file was taken from public GitHub redistributions of Cricsheet data. Five copies, at the commits below, have the same git blob SHA. This shows consistency between the copies, not official authenticity. Replace with a browser download using `npm run data:import -- <path-to-1298150.json>`.",
+  "retrieved": "2026-10-14",
+  "gitBlobSha1": "3276a2d697c284ca02b85e2c10c9f4dcd64582e6",
+  "mirrors": [
+    {
+      "repo": "Hackquantumcpp/cricket-elo",
+      "path": "data/1298150.json",
+      "commit": "8f32f65943d670106433423440ab5e5127e10924"
+    },
+    {
+      "repo": "AMMARKHALID2004/Cricket-Match-Win-Probability-Predictor",
+      "path": "t20s_json/1298150.json",
+      "commit": "4a878fa905d5b88a637ab35e54fbdbf42c781804"
+    },
+    {
+      "repo": "cepdnaclk/e19-co544-cricket-analytics-and-prediction",
+      "path": "Data/t20s_male_json/1298150.json",
+      "commit": "7080cba52c7a6bb7e48e70ce4e7d1c45521d092f"
+    },
+    {
+      "repo": "Krishnaag23/CrickPick",
+      "path": "all_json/1298150.json",
+      "commit": "5be1a58dab55ee4743aae108d4c230a874e9208a"
+    },
+    {
+      "repo": "SL-MGx03/T20-WC-Predicter",
+      "path": "data_set/1298150.json",
+      "commit": "67af1ece2bc553bf86a444c98895512f14ace898"
+    }
+  ],
+  "officialComparison": "not performed: official download blocked by a browser-verification page"
 }

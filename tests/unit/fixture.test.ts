@@ -101,3 +101,18 @@ describe("fixture validation rejects unsupported matches", () => {
     expect(() => normalizeCricsheetMatch(r, "test")).toThrow(message);
   });
 });
+
+describe("ordinary extras are not confused with penalty runs", () => {
+  it("accepts the fixture's wides, no-balls, byes and leg-byes", () => {
+    const chase = loadChase();
+    const kinds = new Set(chase.deliveries.flatMap((d) => Object.entries(d.extras).filter(([, n]) => n > 0).map(([k]) => k)));
+    expect([...kinds].sort()).toEqual(["byes", "legbyes", "noballs", "wides"]);
+  });
+
+  it("treats an explicit zero penalty as no penalty", () => {
+    const r = raw();
+    const d = r.innings[1].overs[0].deliveries[0] as { extras?: object };
+    d.extras = { penalty: 0 };
+    expect(() => normalizeCricsheetMatch(r, "test")).not.toThrow();
+  });
+});

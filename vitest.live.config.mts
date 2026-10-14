@@ -2,8 +2,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
-// Opt-in real-API verification: `npm run verify:ai`. Reads OPENAI_* from .env.local.
-const envFile = path.resolve(import.meta.dirname, ".env.local");
+// Opt-in real-API verification: `npm run verify:ai`.
+// Loads OPENAI_* from .env.local with Node's own loader (independent of Next.js startup).
+// Variables already set in the shell take precedence. MATCHBRIEF_ENV_FILE points at a
+// different file, e.g. for a dry run against a local mock endpoint.
+const envFile = path.resolve(import.meta.dirname, process.env.MATCHBRIEF_ENV_FILE ?? ".env.local");
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 export default defineConfig({

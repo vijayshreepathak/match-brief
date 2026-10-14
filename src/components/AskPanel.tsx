@@ -4,7 +4,7 @@ import { useState } from "react";
 import { MAX_QUESTION_LENGTH, type AnswerStatus, type AskResponse } from "@/lib/ai/types";
 import type { ReplayView } from "@/lib/match/view";
 import { EvidenceChips, EvidencePanel, useEvidenceFocus } from "./Evidence";
-import { AsOfLabel, ModeBadge } from "./ResponseMeta";
+import { AsOfLabel, FactLines, ModeBadge } from "./ResponseMeta";
 
 export interface QaItem {
   id: number;
@@ -148,7 +148,7 @@ function Answer({ data, view }: { data: AskResponse; view: ReplayView }) {
     <div className="mt-2 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <ModeBadge mode={data.mode} model={data.model} fallbackReason={data.fallbackReason} />
+          <ModeBadge mode={data.mode} model={data.model} fallbackReason={data.fallbackReason} cached={data.cached} generatedAt={data.generatedAt} />
           <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700" data-testid="answer-status">
             {STATUS_TEXT[data.answer.status]}
           </span>
@@ -158,6 +158,7 @@ function Answer({ data, view }: { data: AskResponse; view: ReplayView }) {
       <p className="text-slate-900" data-testid="answer-text">
         {data.answer.text}
       </p>
+      <FactLines facts={data.answer.facts} />
       <EvidenceChips ids={data.answer.evidence} evidence={data.evidence} onSelect={focus.select} />
       {data.answer.evidence.length > 0 && (
         <EvidencePanel

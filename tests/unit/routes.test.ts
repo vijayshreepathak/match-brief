@@ -43,6 +43,9 @@ describe("POST /api/catchup", () => {
     ["string", { lastSeenSeq: "0", viewingSeq: 60 }, "invalid_request"],
     ["missing field", { viewingSeq: 60 }, "invalid_request"],
     ["browser-supplied score", { lastSeenSeq: 0, viewingSeq: 60, score: "200/0" }, "invalid_request"],
+    ["browser-chosen model", { lastSeenSeq: 0, viewingSeq: 60, model: "gpt-5.4" }, "invalid_request"],
+    ["browser-chosen token limit", { lastSeenSeq: 0, viewingSeq: 60, max_output_tokens: 100000 }, "invalid_request"],
+    ["browser-supplied facts", { lastSeenSeq: 0, viewingSeq: 60, facts: [{ id: "F_SCORE", value: "200/0" }] }, "invalid_request"],
   ])("rejects %s checkpoints", async (_name, body, code) => {
     const res = await call(catchupPost, post(body));
     expect(res.status).toBe(400);

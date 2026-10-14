@@ -1,132 +1,178 @@
-import type { ModelContext } from "./context";
-import type { AnswerOutput, CatchUpOutput } from "./prompts";
-import type { AnswerResult, CatchUpRecap, FallbackReason } from "./types";
+import { eventKinds, factStatement, type ModelContext } from "./context";
+import type { AnswerOutput, CatchUpOutput, ModelPoint } from "./prompts";
+import type { AnswerResult, CatchUpRecap, CitedText, FallbackReason } from "./types";
 
-// Deterministic checks on model output. Passing them does not prove a claim is
-// true; they reject output that is malformed, cites unknown evidence, uses numbers
-// that appear nowhere in the supplied data, or states a result that is not known yet.
+// Deterministic checks on model output.
+//
+// The model writes words only; every number shown to the fan is rendered by the
+// server from canonical facts it selected by ID, labelled with the checkpoint or
+// interval the fact describes. Delivery references are structured {id, kind} claims
+// checked against the actual delivery. These checks remove whole classes of error
+// (wrong numbers, swapped numbers, numbers from the wrong checkpoint, mislabelled
+// deliveries). They do not prove that free-text interpretation is correct.
 
 export type GuardResult<T> = { ok: true; value: T } | { ok: false; reason: FallbackReason; detail: string };
+type Problem = { reason: FallbackReason; detail: string } | null;
 
 const LIMITS = {
-  headlineWords: 16,
-  itemWords: 45,
-  catchUpWords: 160,
-  answerWords: 120,
-  maxEvidencePerItem: 10,
+  headlineWords: 14,
+  noteWords: 40,
+  catchUpNoteWords: 120,
+  answerWords: 70,
+  maxFactsPerPoint: 6,
+  maxEventsPerPoint: 8,
 };
 
 function words(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function canonicalNumber(token: string): string {
-  return String(Number(token));
+// "four"/"six" are boundary names in cricket; only treat them as counts before a countable noun.
+const NUMBER_WORDS =
+  /\b(two|three|five|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|dozen|half-century|century|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)\b/i;
+const FOUR_SIX_COUNT =
+  /\b(four|six)\s+(runs?|balls?|wickets?|overs?|deliveries|fours|sixes|boundaries|extras|wides|byes|singles|dots?)\b/i;
+
+/** Numerals or number words in model-written text. The model must select facts instead. */
+export function writtenNumbers(text: string): string[] {
+  // "T20" names the format; it is not a claim.
+  const found = [...(text.replace(/\bT20\b/gi, "").match(/\d+(?:[.,]\d+)?/g) ?? [])];
+  const word = text.match(NUMBER_WORDS);
+  if (word) found.push(word[0]);
+  const count = text.match(FOUR_SIX_COUNT);
+  if (count) found.push(count[0]);
+  return found;
 }
 
-export function numbersIn(text: string): string[] {
-  // Delivery IDs such as "E82" are references, not numbers that can ground a claim.
-  const withoutIds = text.replace(/\bE\d+\b/g, " ");
-  return (withoutIds.match(/\d+(?:\.\d+)?/g) ?? []).map(canonicalNumber);
-}
+const RESULT_CLAIM = new RegExp(
+  [
+    String.raw`\bwon\b`,
+    String.raw`\bwins? (?:by|it|the match|the game)\b`,
+    String.raw`\b(?:will|going to|go on to|goes on to|went on to) (?:win|lose)\b`,
+    String.raw`\blos(?:e|es|t) (?:by|it|the match|the game)\b`,
+    String.raw`\beventually\b`,
+    String.raw`\bwent on to\b`,
+    String.raw`\bover the line\b`,
+    String.raw`\bhome and dry\b`,
+    String.raw`\b(?:seal|clinch)(?:s|es|ed)?\b`,
+    String.raw`\bwinning runs?\b`,
+    String.raw`\bfinal (?:score|result|total)\b`,
+    String.raw`\b(?:player|man) of the match\b`,
+  ].join("|"),
+  "i",
+);
+// Only explicit statements that the result is unknown exempt a sentence (not any "not"/"don't").
+const RESULT_UNKNOWN =
+  /\b(?:not (?:yet )?known|unknown|undecided|not (?:yet )?decided|too early to (?:say|tell)|can(?:not|'t) (?:predict|say|tell|know)|won't predict|do(?:n't| not) know|not (?:available|included) in|isn't (?:available|known)|no information)\b/i;
 
-/** Numbers the model may use: anything in the context or question, plus small counts and over numbers. */
-export function allowedNumbers(ctx: ModelContext, question = ""): Set<string> {
-  const allowed = new Set<string>();
-  for (let n = 0; n <= 20; n++) allowed.add(String(n));
-  for (const token of [...numbersIn(JSON.stringify(ctx.payload)), ...numbersIn(question)]) {
-    allowed.add(token);
-    const value = Number(token);
-    // Allow "more than 15 an over" for a context value of 15.50.
-    allowed.add(String(Math.floor(value)));
-    allowed.add(String(Math.ceil(value)));
-  }
-  return allowed;
-}
-
-export function ungroundedNumbers(text: string, allowed: Set<string>): string[] {
-  return numbersIn(text).filter((n) => !allowed.has(n));
-}
-
-const RESULT_CLAIM =
-  /\b(won|wins by|win by|went on to (?:win|lose)|player of the match|man of the match|clinched|sealed (?:the|a) (?:win|victory|match))\b/i;
-// "no-ball" is not a negation.
-const NEGATION = /\b(not|never|cannot|unknown|unavailable)\b|n't\b|\bno\b(?!-)/i;
-
-/** Sentences that state a result while the chase is still in progress. */
+/** Sentences that state or hint at how the chase ends while it is still in progress. */
 export function prematureResultClaims(text: string, chaseComplete: boolean): string[] {
   if (chaseComplete) return [];
   return text
     .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => RESULT_CLAIM.test(sentence) && !NEGATION.test(sentence));
+    .filter((sentence) => RESULT_CLAIM.test(sentence) && !RESULT_UNKNOWN.test(sentence));
 }
 
-function checkText(
-  texts: string[],
-  ctx: ModelContext,
-  question: string | undefined,
-): { reason: FallbackReason; detail: string } | null {
-  const allowed = allowedNumbers(ctx, question);
+function checkWording(texts: string[], ctx: ModelContext): Problem {
   const all = texts.join(" ");
-  const badNumbers = ungroundedNumbers(all, allowed);
-  if (badNumbers.length) return { reason: "ungrounded_output", detail: `numbers not in context: ${badNumbers.join(", ")}` };
+  const numbers = writtenNumbers(all);
+  if (numbers.length) return { reason: "ungrounded_output", detail: `model wrote numbers itself: ${numbers.join(", ")}` };
   const claims = prematureResultClaims(all, ctx.snapshot.inningsComplete);
-  if (claims.length) return { reason: "ungrounded_output", detail: `result claim before the chase ended: ${claims[0]}` };
+  if (claims.length) return { reason: "ungrounded_output", detail: `result hinted before the chase ended: ${claims[0]}` };
   return null;
 }
 
-function checkIds(ids: string[], ctx: ModelContext, required: boolean): { reason: FallbackReason; detail: string } | null {
-  if (required && ids.length === 0) return { reason: "invalid_evidence", detail: "missing evidence" };
-  if (ids.length > LIMITS.maxEvidencePerItem) return { reason: "invalid_output", detail: "too many evidence IDs" };
-  const unknown = ids.filter((id) => !ctx.evidence.has(id));
-  if (unknown.length) return { reason: "invalid_evidence", detail: `unknown evidence IDs: ${unknown.join(", ")}` };
+interface PointRules {
+  needsEvidence: boolean;
+  /** Restrict facts to these scopes (e.g. "watch next" must use current facts). */
+  scopes?: string[];
+  /** Restrict events to the catch-up window. */
+  windowOnly?: boolean;
+}
+
+function checkPoint(p: ModelPoint, ctx: ModelContext, rules: PointRules): Problem {
+  if (p.fact_ids.length > LIMITS.maxFactsPerPoint || p.events.length > LIMITS.maxEventsPerPoint) {
+    return { reason: "invalid_output", detail: "too many references in one point" };
+  }
+  if (rules.needsEvidence && p.fact_ids.length + p.events.length === 0) {
+    return { reason: "invalid_evidence", detail: "claim has no supporting fact or delivery" };
+  }
+  for (const id of p.fact_ids) {
+    const fact = ctx.factsById.get(id);
+    if (!fact) return { reason: "invalid_evidence", detail: `unknown fact ${id}` };
+    if (rules.scopes && !rules.scopes.includes(fact.scope)) {
+      return { reason: "invalid_evidence", detail: `fact ${id} describes ${fact.scopeLabel}, not the current checkpoint` };
+    }
+  }
+  for (const claim of p.events) {
+    const d = ctx.citableEvents.get(claim.id);
+    if (!d) return { reason: "invalid_evidence", detail: `unknown or future delivery ${claim.id}` };
+    if (!eventKinds(d).includes(claim.kind)) {
+      return { reason: "invalid_evidence", detail: `${claim.id} was not a ${claim.kind} (${eventKinds(d).join(", ")})` };
+    }
+    if (rules.windowOnly && (d.seq <= ctx.asOf.lastSeenSeq || d.seq > ctx.asOf.viewingSeq)) {
+      return { reason: "invalid_evidence", detail: `${claim.id} is outside the catch-up window` };
+    }
+  }
   return null;
 }
 
 const unique = (ids: string[]) => [...new Set(ids)];
 
+/** Converts a validated point into display text plus server-rendered fact statements. */
+export function renderPoint(note: string, factIds: string[], eventIds: string[], ctx: ModelContext): CitedText {
+  const facts = unique(factIds).map((id) => ({ id, statement: factStatement(ctx.factsById.get(id)!) }));
+  return { text: note.trim(), facts, evidence: unique([...factIds, ...eventIds]) };
+}
+
 export function validateCatchUp(output: CatchUpOutput, ctx: ModelContext): GuardResult<CatchUpRecap> {
-  const items = [...output.what_changed, output.why_it_matters, output.watch_next];
+  const points = [...output.what_changed, output.why_it_matters, output.watch_next];
   if (output.what_changed.length < 1 || output.what_changed.length > 4) {
-    return { ok: false, reason: "invalid_output", detail: "what_changed must have 1-4 items" };
+    return { ok: false, reason: "invalid_output", detail: "what_changed must have 1-4 points" };
   }
   if (!output.headline.trim() || words(output.headline) > LIMITS.headlineWords) {
     return { ok: false, reason: "invalid_output", detail: "headline missing or too long" };
   }
-  if (items.some((i) => !i.text.trim() || words(i.text) > LIMITS.itemWords)) {
-    return { ok: false, reason: "invalid_output", detail: "an item is empty or too long" };
+  if (points.some((p) => !p.note.trim() || words(p.note) > LIMITS.noteWords)) {
+    return { ok: false, reason: "invalid_output", detail: "a note is empty or too long" };
   }
-  const allText = [output.headline, ...items.map((i) => i.text)];
-  if (words(allText.join(" ")) > LIMITS.catchUpWords) {
+  if (words(points.map((p) => p.note).join(" ")) > LIMITS.catchUpNoteWords) {
     return { ok: false, reason: "invalid_output", detail: "recap too long" };
   }
-  for (const item of items) {
-    const problem = checkIds(item.evidence_ids, ctx, true);
+
+  const checks: [ModelPoint, PointRules][] = [
+    ...output.what_changed.map((p): [ModelPoint, PointRules] => [p, { needsEvidence: true, windowOnly: true }]),
+    [output.why_it_matters, { needsEvidence: true }],
+    [output.watch_next, { needsEvidence: true, scopes: ["now", "match"] }],
+  ];
+  for (const [point, rules] of checks) {
+    const problem = checkPoint(point, ctx, rules);
     if (problem) return { ok: false, ...problem };
   }
-  const textProblem = checkText(allText, ctx, undefined);
-  if (textProblem) return { ok: false, ...textProblem };
+  const wording = checkWording([output.headline, ...points.map((p) => p.note)], ctx);
+  if (wording) return { ok: false, ...wording };
 
-  const cited = (i: { text: string; evidence_ids: string[] }) => ({ text: i.text.trim(), evidence: unique(i.evidence_ids) });
+  const render = (p: ModelPoint) => renderPoint(p.note, p.fact_ids, p.events.map((e) => e.id), ctx);
   return {
     ok: true,
     value: {
       headline: output.headline.trim(),
-      whatChanged: output.what_changed.map(cited),
-      whyItMatters: { ...cited(output.why_it_matters), kind: "interpretation" },
-      watchNext: cited(output.watch_next),
+      whatChanged: output.what_changed.map(render),
+      whyItMatters: { ...render(output.why_it_matters), kind: "interpretation" },
+      watchNext: render(output.watch_next),
     },
   };
 }
 
-export function validateAnswer(output: AnswerOutput, ctx: ModelContext, question: string): GuardResult<AnswerResult> {
+export function validateAnswer(output: AnswerOutput, ctx: ModelContext): GuardResult<AnswerResult> {
   const text = output.answer.trim();
   if (!text || words(text) > LIMITS.answerWords) {
     return { ok: false, reason: "invalid_output", detail: "answer missing or too long" };
   }
-  const idProblem = checkIds(output.evidence_ids, ctx, output.status === "answered");
-  if (idProblem) return { ok: false, ...idProblem };
-  const textProblem = checkText([text], ctx, question);
-  if (textProblem) return { ok: false, ...textProblem };
-  return { ok: true, value: { status: output.status, text, evidence: unique(output.evidence_ids) } };
+  const point = { note: text, fact_ids: output.fact_ids, events: output.events };
+  const problem = checkPoint(point, ctx, { needsEvidence: output.status === "answered" });
+  if (problem) return { ok: false, ...problem };
+  const wording = checkWording([text], ctx);
+  if (wording) return { ok: false, ...wording };
+  return { ok: true, value: { status: output.status, ...renderPoint(text, output.fact_ids, output.events.map((e) => e.id), ctx) } };
 }

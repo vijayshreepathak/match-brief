@@ -9,12 +9,24 @@ export interface ModelRequest<T> {
   input: string;
 }
 
-export interface StructuredModel {
-  readonly model: string;
-  generate<T>(request: ModelRequest<T>): Promise<{ parsed: T; model: string }>;
+export interface ModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number | null;
 }
 
-export type ProviderFailure = "timeout" | "provider_error" | "invalid_output";
+export interface ModelResult<T> {
+  parsed: T;
+  model: string;
+  usage: ModelUsage | null;
+}
+
+export interface StructuredModel {
+  readonly model: string;
+  generate<T>(request: ModelRequest<T>): Promise<ModelResult<T>>;
+}
+
+export type ProviderFailure = "timeout" | "provider_error" | "provider_rate_limited" | "invalid_output" | "refusal" | "incomplete";
 
 export class ProviderError extends Error {
   constructor(

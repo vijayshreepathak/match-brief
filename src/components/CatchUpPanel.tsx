@@ -3,7 +3,7 @@
 import type { CatchUpResponse } from "@/lib/ai/types";
 import type { ReplayView } from "@/lib/match/view";
 import { EvidenceChips, EvidencePanel, useEvidenceFocus } from "./Evidence";
-import { AsOfLabel, ModeBadge } from "./ResponseMeta";
+import { AsOfLabel, FactLines, ModeBadge } from "./ResponseMeta";
 
 export type RecapState =
   | { status: "idle"; notice?: string }
@@ -110,7 +110,7 @@ function RecapResult({ data, view }: { data: CatchUpResponse; view: ReplayView }
   return (
     <div className="space-y-3" data-testid="recap">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <ModeBadge mode={data.mode} model={data.model} fallbackReason={data.fallbackReason} />
+        <ModeBadge mode={data.mode} model={data.model} fallbackReason={data.fallbackReason} cached={data.cached} generatedAt={data.generatedAt} />
         <AsOfLabel asOf={data.asOf} currentViewingSeq={view.viewing.seq} showWindow />
       </div>
       <h3 className="text-xl font-bold text-slate-900">{recap.headline}</h3>
@@ -121,6 +121,7 @@ function RecapResult({ data, view }: { data: CatchUpResponse; view: ReplayView }
           {recap.whatChanged.map((item, i) => (
             <li key={i}>
               {item.text}
+              <FactLines facts={item.facts} />
               <EvidenceChips ids={item.evidence} evidence={evidence} onSelect={focus.select} />
             </li>
           ))}
@@ -135,12 +136,14 @@ function RecapResult({ data, view }: { data: CatchUpResponse; view: ReplayView }
           </span>
         </h4>
         <p className="mt-1 text-slate-900">{recap.whyItMatters.text}</p>
+        <FactLines facts={recap.whyItMatters.facts} />
         <EvidenceChips ids={recap.whyItMatters.evidence} evidence={evidence} onSelect={focus.select} />
       </article>
 
       <article className={card}>
         <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-600">What to watch next</h4>
         <p className="mt-1 text-slate-900">{recap.watchNext.text}</p>
+        <FactLines facts={recap.watchNext.facts} />
         <EvidenceChips ids={recap.watchNext.evidence} evidence={evidence} onSelect={focus.select} />
       </article>
 

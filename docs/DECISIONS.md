@@ -17,9 +17,8 @@ Short records of the choices that shaped MatchBrief, and why.
 - **Trade-off:** The model may remember this famous result from training data
   and leak it before the replay reaches the end. Mitigations:
   - the prompt forbids it;
-  - a guard rejects result statements while the chase is in progress;
-  - a numeric guard rejects numbers (like Kohli's final 82) that aren't in the
-    supplied data;
+  - a guard rejects result statements and hints while the chase is in progress;
+  - the model cannot write numbers at all (so not Kohli's final 82);
   - eval cases `future-winner` and `ignore-context-injection` test it.
 
   A less famous match would lower this risk, but the leak would be harder to
@@ -27,17 +26,25 @@ Short records of the choices that shaped MatchBrief, and why.
 
 ## 2. How the data was obtained
 
-On 2026-10-14, `cricsheet.org` returned a JavaScript browser-verification page
-to every scripted download. I did not try to get around it. The unmodified
-file came from five independent public GitHub repositories that redistribute
-Cricsheet data (allowed under ODC-By). All five copies were byte-identical, and
-the SHA-256 is recorded in `data/cricsheet/manifest.json` and checked by a
-test. `npm run data:import` swaps in a copy downloaded from Cricsheet in a
-browser.
+`cricsheet.org` returned a JavaScript browser-verification page to every
+scripted download, on 2026-10-14 and again on 2026-10-15. I did not try to get
+around it. The file is a copy of Cricsheet's `1298150.json` as redistributed
+in five public GitHub repositories (allowed under ODC-By). All five copies have
+the same git blob SHA as the bundled file at pinned commits, which are listed
+in `data/cricsheet/NOTICE.md` and `manifest.json`.
+
+- **What that shows:** the copies are *consistent* with each other. It is not
+  proof of official authenticity.
+- **Independent cross-check:** the calculated scorecard matches a published
+  scorecard ball for ball. The checks cover batting, extras, fall of wickets
+  and bowling (test: "reconciliation with the published scorecard").
+- **Checksum:** a test checks the SHA-256 recorded in `manifest.json`.
+- **Replacing the file:** `npm run data:import` swaps in a browser download
+  from Cricsheet and records whether it matches the mirror copy.
 
 The license wording ("Match data is licensed for use under the Open Data
-Commons Attribution License") was confirmed from Cricsheet's own download
-README. The `/licensing` page sits behind the same browser check.
+Commons Attribution License") comes from Cricsheet's own download README. The
+`/licensing` page sits behind the same browser check.
 
 ## 3. Checkpoint = sequential delivery index
 
@@ -79,19 +86,55 @@ receives them as facts with stable IDs and derivations (e.g.
 
 Neither includes first-innings ball-by-ball data, only its total.
 
-## 8. Structured output, then deterministic guards
+## 8. The model writes words; the server renders every number
 
-- **Model-facing Zod schemas** stay simple (no length keywords), so they
-  convert cleanly to strict JSON Schema. A test checks this.
-- **Guards run after parsing:**
-  - word limits;
-  - at least one evidence ID per claim;
-  - every ID must exist in this checkpoint's context;
-  - every number must appear in the context or the question (small counts
-    0–20 are allowed);
-  - no result statements before the chase ends. Negated sentences such as "it
-    is not known who won" are allowed; "no-ball" doesn't count as a negation.
-- **Any failure means a labelled fallback**, never a silent pass-through.
+The first version let the model write numbers. It accepted a number if that
+value appeared anywhere in the context. A pre-submission audit showed this was
+too weak:
+
+- "31 needed off 12" could become "12 off 31", because both numbers exist.
+- "need 115 off 60" (true when the fan left) could be presented as the current
+  equation.
+- A number the fan typed in the question was accepted.
+- A real delivery ID could support an unrelated claim, such as a four cited as
+  a wicket.
+
+**Current design (smallest change that fixes these):**
+
+- **Typed, scoped facts.** Every fact has an ID, a type, a scope (now / when
+  you left / the window / the match), a label, a canonical value and its
+  supporting deliveries. The equation fact labels each half with its own
+  checkpoint.
+- **Words-only model output.**
+  - The model returns a headline and short **notes**, written in words.
+  - It selects facts by `fact_ids`.
+  - It references deliveries as `events: [{id, kind}]`, where `kind` is one of
+    wicket, six, four, wide, no_ball, bye, leg_bye, runs or dot.
+- **Guards reject:**
+  - unknown facts;
+  - deliveries that are future, outside the catch-up window ("what changed"
+    only), or not of the claimed kind;
+  - "what to watch next" built on non-current facts;
+  - any digit or number word in model text. "Four" and "six" are allowed as
+    boundary names, but not as counts ("six balls"); "T20" is allowed;
+  - spoilers before the chase ends;
+  - over-long output.
+- **The server renders fact statements.** For example, "Runs needed (as of
+  18.0 ov): 31 (160 - 129)". These statements are the only source of numbers
+  in AI responses.
+- **Spoiler check.** Patterns such as "won", "eventually", "over the line",
+  "go on to win", "seal" and "clinch" are caught. A sentence is exempt only if
+  it states the result is unknown ("not known", "can't predict"), not merely
+  because it contains a negation. So "Don't worry, India eventually get over
+  the line" is rejected. The check switches off once the chase is complete.
+- **The AI is still useful.** It decides which facts and deliveries matter,
+  writes the headline and the interpretation, and answers questions in plain
+  words. It doesn't become canned text.
+- **Known gap.** Free-text claims with no numbers and no result language can't
+  be verified this way. Example: an invented reason for a no-ball. The prompt
+  and the live eval's forbidden-claim patterns are the only defence. The
+  offline test suite records this gap explicitly (`KNOWN_GUARD_GAPS`).
+- **Any failure means a labelled fallback,** never a silent pass-through.
 
 ## 9. The fallback is honest and useful
 
@@ -169,3 +212,47 @@ command.
 - **AI infrastructure:** vector search/RAG, agents, and MCP.
 - **Cricket rules:** DLS, Super Overs, penalty runs, and retirements. The
   normalizer rejects matches that need them.
+
+## 16. Each provider failure gets its own explicit, honest label
+
+Each provider failure maps to its own fallback reason, shown to the fan in
+plain words:
+
+- refusal → `model_refusal`
+- `status: "incomplete"` → `incomplete_output`
+- SDK timeout → `timeout`
+- HTTP 429 → `provider_rate_limited`. It covers both rate limits and an
+  exhausted credit balance, and it was the first real failure seen.
+- other API errors → `provider_error`
+- JSON or schema failures → `invalid_output`
+
+Server logs record the HTTP status and OpenAI error code, never the response
+body or key. Provider handling is tested through the real SDK with a fake
+`fetch`.
+
+**Cache provenance.** A cached AI answer keeps its model and original
+generation time, and the UI shows "· cached" with that time. Cache keys
+include both checkpoints, so a cached answer can't describe a different
+moment.
+
+## 17. Known dependency finding, with no safe fix
+
+`npm audit` reports GHSA-vfj7-8cjw-p6xm (CVE-2026-93687, high): `braces` stack
+exhaustion on deeply nested patterns. It affects `<= 3.0.3`, and **no patched
+version exists** (3.0.3 is the latest).
+
+- **Path:** `eslint-config-next` → `@next/eslint-plugin-next@16.4.0` →
+  `fast-glob@3.3.1` → `micromatch@4.0.8` → `braces@3.0.3`. That's dev-only:
+  `npm audit --omit=dev` reports 0. Next's own compiled `glob` and `picomatch`
+  don't include `braces`.
+- **npm's suggested fix** is downgrading `eslint-config-next` to 14.2.35, an
+  incompatible major version. `@next/eslint-plugin-next@16.4.1` pins the same
+  `fast-glob`. An override can't help, because no fixed `braces` exists.
+- **Exposure:** only while running `npm run lint`, on glob patterns from the
+  project's own config. Not reachable from the deployed app or user input. It
+  is still a real advisory, not "no risk".
+- **Mitigation:**
+  - lint only trusted code;
+  - keep CI job timeouts;
+  - re-run `npm audit` and upgrade `eslint-config-next` when a release drops
+    the vulnerable chain or `braces` ships a fix.

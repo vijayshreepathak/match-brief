@@ -23,6 +23,12 @@ const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 
 copyFileSync(source, path.join(dataDir, manifest.file));
+// Record how the downloaded file compares with the copy it replaces (the mirror copy).
+manifest.officialComparison =
+  sha256 === manifest.sha256
+    ? `identical to the previous copy (sha256 ${sha256})`
+    : `differs from the previous copy (previous sha256 ${manifest.sha256}, new ${sha256})`;
+console.log(`Comparison with the previous copy: ${manifest.officialComparison}`);
 manifest.sha256 = sha256;
 manifest.cricsheetMeta = match.meta;
 manifest.obtainedVia = "Downloaded from cricsheet.org and imported with scripts/import-cricsheet.mjs.";

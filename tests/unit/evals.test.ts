@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildModelContext } from "@/lib/ai/context";
-import { prematureResultClaims, ungroundedNumbers, allowedNumbers } from "@/lib/ai/guards";
+import { prematureResultClaims, writtenNumbers } from "@/lib/ai/guards";
 import { buildModelInput } from "@/lib/ai/prompts";
 import { runCatchUp } from "@/lib/ai/service";
 import type { StructuredModel } from "@/lib/ai/model";
@@ -12,6 +12,14 @@ import { loadChase } from "../support/fixture";
 // The live half runs with `npm run verify:ai`.
 
 const chase = loadChase();
+
+/**
+ * Bad outputs that the runtime guards cannot detect, because the claim is plain
+ * words about something the data does not record. Only the live evaluation's
+ * forbidden-claim patterns (and the prompt) address these. Kept explicit so the
+ * gap stays visible.
+ */
+const KNOWN_GUARD_GAPS = ["no-ball-cause"];
 
 describe.each(EVAL_CASES)("eval case $id", (c) => {
   const lastSeen = resolveCheckpoint(chase, c.lastSeen);
@@ -40,6 +48,17 @@ describe.each(EVAL_CASES)("eval case $id", (c) => {
       // Validates the eval's own checker, so a live run cannot pass this bad answer.
       expect(c.forbiddenClaims.some((p) => p.test(c.badOutput!))).toBe(true);
     });
+
+    const caught = writtenNumbers(c.badOutput).length > 0 || prematureResultClaims(c.badOutput, ctx.snapshot.inningsComplete).length > 0;
+    if (KNOWN_GUARD_GAPS.includes(c.id)) {
+      it("is a documented gap: runtime guards cannot detect this bad output", () => {
+        expect(caught).toBe(false);
+      });
+    } else {
+      it("the runtime guards reject the known bad output", () => {
+        expect(caught).toBe(true);
+      });
+    }
   }
 });
 
@@ -65,12 +84,10 @@ describe("unchanged-checkpoint case", () => {
   });
 });
 
-describe("runtime guards catch the outcome-leak bad outputs", () => {
-  it.each(["normal-catchup", "future-winner", "ignore-context-injection"])("%s", (id) => {
-    const c = EVAL_CASES.find((e) => e.id === id)!;
-    const ctx = buildModelContext(chase, c.op, resolveCheckpoint(chase, c.lastSeen), resolveCheckpoint(chase, c.viewing));
-    const byNumbers = ungroundedNumbers(c.badOutput!, allowedNumbers(ctx, c.question)).length > 0;
-    const byResult = prematureResultClaims(c.badOutput!, false).length > 0;
-    expect(byNumbers || byResult).toBe(true);
+describe("eval suite shape", () => {
+  it("covers each required scenario with a bounded number of model calls", () => {
+    const counts = EVAL_CASES.reduce<Record<string, number>>((acc, c) => ({ ...acc, [c.category]: (acc[c.category] ?? 0) + 1 }), {});
+    expect(counts).toEqual({ ai_required: 5, honest_refusal: 4, no_model_call: 1 });
+    expect(EVAL_CASES.filter((c) => c.op === "catchup" && c.category === "ai_required").length).toBeGreaterThanOrEqual(2);
   });
 });

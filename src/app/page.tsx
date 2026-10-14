@@ -50,7 +50,7 @@ export default function Home() {
             <a className="underline" href="https://opendatacommons.org/licenses/by/1-0/" target="_blank" rel="noreferrer">
               Open Data Commons Attribution License v1.0
             </a>
-            . Scores are calculated in code. AI text is checked against the match data but can still be wrong.
+            . Scores are calculated in code; the AI writes the wording. Checks reduce errors but cannot catch every wrong interpretation.
           </p>
         </div>
       </footer>

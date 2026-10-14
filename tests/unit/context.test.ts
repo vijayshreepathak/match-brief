@@ -51,7 +51,39 @@ describe("server-built model context", () => {
     expect(fact("F_RUNS_NEEDED")).toBe("31 (160 - 129)");
     expect(fact("F_BALLS_LEFT")).toBe("12 (120 - 108 legal balls bowled)");
     expect(fact("F_RRR")).toBe("15.50 per over (31 x 6 / 12 balls)");
-    expect(fact("F_INT_EQUATION")).toContain("Before: need 115 off 60 balls");
+    // Each half of the equation names its own checkpoint.
+    expect(fact("F_INT_EQUATION")).toBe(
+      "at 10.0 ov: need 115 off 60 balls (required rate 11.50); at 18.0 ov: need 31 off 12 balls (required rate 15.50)",
+    );
+    expect(fact("F_THEN_SCORE")).toBe("India 45/4 after 10.0 overs; need 115 off 60 balls (required rate 11.50)");
+  });
+
+  it("labels every fact with the checkpoint or interval it describes", () => {
+    const ctx = buildModelContext(chase, "catchup", over10, over18);
+    const scope = (id: string) => ctx.factsById.get(id)!;
+    expect(scope("F_RUNS_NEEDED")).toMatchObject({ scope: "now", scopeLabel: "as of 18.0 ov", type: "runs_needed" });
+    expect(scope("F_THEN_SCORE")).toMatchObject({ scope: "then", scopeLabel: "when you left, 10.0 ov" });
+    expect(scope("F_INT_RUNS")).toMatchObject({ scope: "window", scopeLabel: "10.0–18.0 ov" });
+    expect(scope("F_TARGET")).toMatchObject({ scope: "match" });
+    // Supporting deliveries are attached structurally, not embedded in text.
+    expect(scope("F_INT_BOUNDARIES").eventIds).toEqual(["E62", "E76", "E79", "E88", "E104", "E107", "E110", "E67", "E70", "E72"]);
+    expect(scope("F_INT_BOUNDARIES").value).toBe("7 fours, 3 sixes");
+  });
+
+  it("has per-player facts for precise questions", () => {
+    const ctx = buildModelContext(chase, "ask", over10, over18);
+    expect(ctx.factsById.get("F_BAT_V_KOHLI")?.value).toBe("61 not out off 47 balls, 6 fours, 1 six");
+    expect(ctx.factsById.get("F_BAT_AR_PATEL")?.value).toBe("2 off 3 balls, 0 fours, 0 sixes; run out (Mohammad Rizwan/Babar Azam)");
+    expect(ctx.factsById.get("F_BAT_AR_PATEL")?.eventIds).toEqual(["E37"]);
+    expect(ctx.factsById.get("F_BOWL_MOHAMMAD_NAWAZ")?.value).toBe("3.0 overs, 29 runs, 0 wickets");
+  });
+
+  it("makes a fact's supporting deliveries citable even outside the catch-up window", () => {
+    const ctx = buildModelContext(chase, "catchup", over10, over18);
+    // The last wicket (E37) is before the window but is past, so it can be shown as evidence.
+    expect(ctx.factsById.get("F_LAST_WICKET")?.eventIds).toEqual(["E37"]);
+    expect(ctx.citableEvents.has("E37")).toBe(true);
+    expect(ctx.deliveries.some((d) => d.id === "E37")).toBe(false);
   });
 
   it("states the result only once the chase is complete", () => {

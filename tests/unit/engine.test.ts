@@ -198,3 +198,102 @@ describe("replay navigation", () => {
     expect(buildReplayView(chase, 125).canAdvance).toBe(false);
   });
 });
+
+describe("final over, event by event", () => {
+  // From the fixture: Nawaz to Pandya/Karthik/Kohli/Ashwin, 16 needed off 6.
+  it.each([
+    // seq, label, score, runs needed, legal balls remaining
+    [116, "19.0 ov · 144/4", "144/4", 16, 6],
+    [117, "19.1 ov · 144/5", "144/5", 16, 5], // Pandya caught
+    [118, "19.2 ov · 145/5", "145/5", 15, 4], // Karthik single
+    [119, "19.3 ov · 147/5", "147/5", 13, 3], // Kohli two
+    [120, "19.3 ov · 154/5", "154/5", 6, 3], // no-ball hit for six: 7 runs, no legal ball used
+    [121, "19.3 ov · 155/5", "155/5", 5, 3], // wide: 1 run, no legal ball used
+    [122, "19.4 ov · 158/5", "158/5", 2, 2], // 3 byes off a legal ball
+    [123, "19.5 ov · 158/6", "158/6", 2, 1], // Karthik stumped
+    [124, "19.5 ov · 159/6", "159/6", 1, 1], // wide
+    [125, "20.0 ov · 160/6", "160/6", 0, 0], // Ashwin single: target reached
+  ])("after delivery %i (%s)", (seq, label, score, needed, balls) => {
+    const s = snapshotAt(chase, seq);
+    expect(s.label).toBe(label);
+    expect(`${s.runs}/${s.wickets}`).toBe(score);
+    expect(s.runsNeeded).toBe(needed);
+    expect(s.ballsRemaining).toBe(balls);
+  });
+
+  it("credits the three byes to team extras, not to the batter", () => {
+    const before = snapshotAt(chase, 121);
+    const after = snapshotAt(chase, 122);
+    const kohli = (s: typeof before) => s.batters.find((b) => b.name === "V Kohli")!;
+    expect(chase.deliveries[121]).toMatchObject({ batter: "V Kohli", batterRuns: 0, totalRuns: 3, isLegal: true });
+    expect(after.extras.byes - before.extras.byes).toBe(3);
+    expect(kohli(after).runs).toBe(kohli(before).runs);
+    expect(kohli(after).balls).toBe(kohli(before).balls + 1); // a legal ball faced
+  });
+
+  it("counts both final-over dismissals and nothing else", () => {
+    const wickets = chase.deliveries.filter((d) => d.overIndex === 19).flatMap((d) => d.dismissals.map((w) => `${d.id}:${w.playerOut}:${w.kind}`));
+    expect(wickets).toEqual(["E117:HH Pandya:caught", "E123:KD Karthik:stumped"]);
+  });
+
+  it("the first delivery of the chase", () => {
+    const s = snapshotAt(chase, 1);
+    expect(s).toMatchObject({ runs: 0, wickets: 0, legalBalls: 1, overs: "0.1", runsNeeded: 160, ballsRemaining: 119 });
+    expect(s.currentRunRate).toBe(0);
+    expect(s.requiredRunRate).toBeCloseTo((160 * 6) / 119, 6);
+  });
+});
+
+describe("reconciliation with the published scorecard", () => {
+  // India innings as published (TV9 Bangla scorecard, corroborated by Wisden's listing):
+  // https://tv9bangla.com/sports/cricket-news/india-vs-pakistan-full-scorecard-live-cricket-score-icc-men-39-s-t20-world-cup-australia-2022-match-bangla-209250.html
+  // Extras "(b 3, lb 1, w 6, nb 1, Penalty 0) 11", total 160/6 (20.0).
+  const final = snapshotAt(chase, 125);
+  const bat = (name: string) => final.batters.find((b) => b.name === name)!;
+
+  it.each([
+    ["KL Rahul", 4, 8, 0, 0, true],
+    ["RG Sharma", 4, 7, 0, 0, true],
+    ["V Kohli", 82, 53, 6, 4, false],
+    ["SA Yadav", 15, 10, 2, 0, true],
+    ["AR Patel", 2, 3, 0, 0, true],
+    ["HH Pandya", 40, 37, 1, 2, true],
+    ["KD Karthik", 1, 2, 0, 0, true],
+    ["R Ashwin", 1, 1, 0, 0, false],
+  ] as const)("%s %i (%i balls, %ix4, %ix6)", (name, runs, balls, fours, sixes, out) => {
+    expect(bat(name)).toMatchObject({ runs, balls, fours, sixes, out });
+  });
+
+  it("extras, total and overs", () => {
+    expect(final.extras).toEqual({ byes: 3, legbyes: 1, wides: 6, noballs: 1, total: 11 });
+    expect(`${final.runs}/${final.wickets} (${final.overs})`).toBe("160/6 (20.0)");
+  });
+
+  it("fall of wickets: score and ball", () => {
+    const fow: string[] = [];
+    for (const d of chase.deliveries) {
+      if (d.dismissals.length) {
+        const s = snapshotAt(chase, d.seq);
+        fow.push(`${s.wickets}-${s.runs} (${d.dismissals[0].playerOut}, ${d.ballLabel})`);
+      }
+    }
+    expect(fow).toEqual([
+      "1-7 (KL Rahul, 1.5)",
+      "2-10 (RG Sharma, 3.2)",
+      "3-26 (SA Yadav, 5.3)",
+      "4-31 (AR Patel, 6.1)",
+      "5-144 (HH Pandya, 19.1)",
+      "6-158 (KD Karthik, 19.5)",
+    ]);
+  });
+
+  it.each([
+    ["Shaheen Shah Afridi", "4.0", 34, 0],
+    ["Naseem Shah", "4.0", 23, 1],
+    ["Haris Rauf", "4.0", 36, 2],
+    ["Shadab Khan", "4.0", 21, 0],
+    ["Mohammad Nawaz", "4.0", 42, 2],
+  ] as const)("%s %s-%i-%i", (name, overs, runs, wickets) => {
+    expect(final.bowlers.find((b) => b.name === name)).toMatchObject({ overs, runs, wickets });
+  });
+});
