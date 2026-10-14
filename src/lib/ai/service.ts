@@ -1,0 +1,183 @@
+import type { Chase } from "@/lib/cricket/types";
+import { buildModelContext, type ModelContext } from "./context";
+import { fallbackAnswer, fallbackRecap, noChangeRecap } from "./fallback";
+import { validateAnswer, validateCatchUp, type GuardResult } from "./guards";
+import { BoundedCache, FixedWindowLimiter } from "./limits";
+import { ProviderError, type StructuredModel } from "./model";
+import {
+  ASK_INSTRUCTIONS,
+  AnswerOutputSchema,
+  CATCHUP_INSTRUCTIONS,
+  CatchUpOutputSchema,
+  PROMPT_VERSION,
+  buildModelInput,
+} from "./prompts";
+import type {
+  AnswerResult,
+  AskResponse,
+  CatchUpRecap,
+  CatchUpResponse,
+  EvidenceItem,
+  FallbackReason,
+} from "./types";
+
+// Orchestrates one user-triggered AI operation:
+// validate checkpoints -> build context on the server -> cache / rate limit ->
+// model call -> guards -> either validated AI output or a labelled rule-based fallback.
+
+type Outcome<T> = { ok: true; value: T; model: string } | { ok: false; reason: FallbackReason; detail: string };
+
+export interface AiDeps {
+  model: StructuredModel | null;
+  clientKey: string;
+  cache?: BoundedCache<Outcome<unknown>>;
+  limiter?: FixedWindowLimiter;
+  /** Server log hook; never sent to the browser. */
+  log?: (message: string) => void;
+}
+
+const sharedCache = new BoundedCache<Outcome<unknown>>(200);
+const sharedLimiter = new FixedWindowLimiter(Number(process.env.MATCHBRIEF_AI_RATE_LIMIT) || 30, 10 * 60_000);
+const inFlight = new Map<string, Promise<Outcome<unknown>>>();
+
+export function cacheKey(parts: {
+  fixtureVersion: string;
+  model: string;
+  op: "catchup" | "ask";
+  lastSeenSeq: number;
+  viewingSeq: number;
+  question?: string;
+}): string {
+  return JSON.stringify([
+    parts.fixtureVersion,
+    PROMPT_VERSION,
+    parts.model,
+    process.env.OPENAI_REASONING_EFFORT ?? "",
+    parts.op,
+    parts.lastSeenSeq,
+    parts.viewingSeq,
+    parts.question ? normalizeQuestion(parts.question).toLowerCase() : "",
+  ]);
+}
+
+export function normalizeQuestion(question: string): string {
+  // Strip control characters and collapse whitespace.
+  return question.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function resolveEvidence(ctx: ModelContext, ids: string[]): Record<string, EvidenceItem> {
+  const out: Record<string, EvidenceItem> = {};
+  for (const id of ids) {
+    const item = ctx.evidence.get(id);
+    if (item) out[id] = item;
+  }
+  return out;
+}
+
+function recapIds(r: CatchUpRecap): string[] {
+  return [...r.whatChanged, r.whyItMatters, r.watchNext].flatMap((i) => i.evidence);
+}
+
+async function runModel<T>(
+  key: string,
+  deps: AiDeps,
+  call: (model: StructuredModel) => Promise<GuardResult<T> & { model?: string }>,
+): Promise<Outcome<T> & { cached: boolean }> {
+  const model = deps.model;
+  if (!model) return { ok: false, reason: "missing_config", detail: "no API key", cached: false };
+
+  const cache = deps.cache ?? sharedCache;
+  const hit = cache.get(key) as Outcome<T> | undefined;
+  if (hit) return { ...hit, cached: true };
+
+  // Identical request already running (e.g. double click from two tabs): share it.
+  const pending = inFlight.get(key) as Promise<Outcome<T>> | undefined;
+  if (pending) return { ...(await pending), cached: false };
+
+  if (!(deps.limiter ?? sharedLimiter).take(deps.clientKey)) {
+    return { ok: false, reason: "rate_limited", detail: "per-client limit", cached: false };
+  }
+
+  const promise = (async (): Promise<Outcome<T>> => {
+    try {
+      const result = await call(model);
+      if (!result.ok) return { ok: false, reason: result.reason, detail: result.detail };
+      return { ok: true, value: result.value, model: result.model ?? model.model };
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        return { ok: false, reason: error.kind, detail: error.message };
+      }
+      return { ok: false, reason: "provider_error", detail: "unexpected error" };
+    }
+  })();
+
+  inFlight.set(key, promise as Promise<Outcome<unknown>>);
+  try {
+    const outcome = await promise;
+    // Only validated AI output is cached; failures can be retried.
+    if (outcome.ok) cache.set(key, outcome as Outcome<unknown>);
+    return { ...outcome, cached: false };
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+export async function runCatchUp(
+  chase: Chase,
+  request: { lastSeenSeq: number; viewingSeq: number },
+  deps: AiDeps,
+): Promise<CatchUpResponse> {
+  const ctx = buildModelContext(chase, "catchup", request.lastSeenSeq, request.viewingSeq);
+  const base = { ok: true as const, op: "catchup" as const, asOf: ctx.asOf };
+
+  if (!ctx.interval) {
+    const recap = noChangeRecap(chase, ctx);
+    return { ...base, mode: "no_change", model: null, fallbackReason: null, recap, evidence: resolveEvidence(ctx, recapIds(recap)), cached: false };
+  }
+
+  const key = cacheKey({ fixtureVersion: chase.fixtureVersion, model: deps.model?.model ?? "", op: "catchup", ...request });
+  const outcome = await runModel<CatchUpRecap>(key, deps, async (model) => {
+    const { parsed, model: used } = await model.generate({
+      schema: CatchUpOutputSchema,
+      schemaName: "catch_up",
+      instructions: CATCHUP_INSTRUCTIONS,
+      input: buildModelInput(ctx.payload),
+    });
+    return { ...validateCatchUp(parsed, ctx), model: used };
+  });
+
+  if (outcome.ok) {
+    return { ...base, mode: "ai", model: outcome.model, fallbackReason: null, recap: outcome.value, evidence: resolveEvidence(ctx, recapIds(outcome.value)), cached: outcome.cached };
+  }
+  deps.log?.(`catchup fallback: ${outcome.reason} (${outcome.detail})`);
+  const recap = fallbackRecap(chase, ctx);
+  return { ...base, mode: "fallback", model: null, fallbackReason: outcome.reason, recap, evidence: resolveEvidence(ctx, recapIds(recap)), cached: false };
+}
+
+export async function runAsk(
+  chase: Chase,
+  request: { lastSeenSeq: number; viewingSeq: number; question: string },
+  deps: AiDeps,
+): Promise<AskResponse> {
+  const question = normalizeQuestion(request.question);
+  const ctx = buildModelContext(chase, "ask", request.lastSeenSeq, request.viewingSeq);
+  const base = { ok: true as const, op: "ask" as const, asOf: ctx.asOf, question };
+
+  const key = cacheKey({ fixtureVersion: chase.fixtureVersion, model: deps.model?.model ?? "", op: "ask", ...request, question });
+  const outcome = await runModel<AnswerResult>(key, deps, async (model) => {
+    const { parsed, model: used } = await model.generate({
+      schema: AnswerOutputSchema,
+      schemaName: "answer",
+      instructions: ASK_INSTRUCTIONS,
+      input: buildModelInput(ctx.payload, question),
+    });
+    return { ...validateAnswer(parsed, ctx, question), model: used };
+  });
+
+  if (outcome.ok) {
+    return { ...base, mode: "ai", model: outcome.model, fallbackReason: null, answer: outcome.value, evidence: resolveEvidence(ctx, outcome.value.evidence), cached: outcome.cached };
+  }
+  deps.log?.(`ask fallback: ${outcome.reason} (${outcome.detail})`);
+  const answer = fallbackAnswer(question, ctx);
+  return { ...base, mode: "fallback", model: null, fallbackReason: outcome.reason, answer, evidence: resolveEvidence(ctx, answer.evidence), cached: false };
+}

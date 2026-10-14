@@ -1,0 +1,5 @@
+# Keep line endings stable across Windows/macOS/Linux.
+* text=auto eol=lf
+
+# The Cricsheet fixture is checksummed: store and check it out byte-for-byte.
+data/cricsheet/1298150.json -text
