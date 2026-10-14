@@ -12,11 +12,12 @@
     "test:e2e": "next build && playwright test",
     "verify:ai": "vitest run --config vitest.live.config.mts",
     "data:import": "node scripts/import-cricsheet.mjs",
-    "verify:ai:browser": "next build && playwright test --config playwright.live.config.ts"
+    "verify:ai:browser": "next build && playwright test --config playwright.live.config.ts",
+    "verify:ai:smoke": "vitest run --config vitest.live.config.mts -t smoke"
   },
   "dependencies": {
+    "@google/genai": "^2.29.1",
     "next": "16.4.0",
-    "openai": "^7.33.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",

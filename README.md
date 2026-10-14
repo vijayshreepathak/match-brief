@@ -29,19 +29,20 @@ current moment.
 
 ## Run it locally
 
-Requires Node.js 22 or newer.
+You need Node.js 22 or newer.
 
 ```bash
 cd dream11-matchbrief
 npm install
-cp .env.example .env.local      # then put your key in .env.local (optional)
+cp .env.example .env.local      # then add GEMINI_API_KEY to .env.local (optional)
 npm run dev                     # http://localhost:3000
 ```
 
-`.env.local` lives in the project root, next to `package.json`. It is
-git-ignored. Without a key, the app works fully in labelled fallback mode.
+`.env.local` sits in the project root, next to `package.json`, and git
+ignores it. Without a key, the app still works fully in labelled fallback
+mode.
 
-Production build:
+For a production build:
 
 ```bash
 npm run build
@@ -52,13 +53,22 @@ npm start
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | For AI mode | Server-only. Without it, recaps and answers use the rule-based fallback. |
-| `OPENAI_MODEL` | No | Defaults to `gpt-5.4-mini`. Any model with Responses API and Structured Outputs support. |
-| `OPENAI_REASONING_EFFORT` | No | Only sent when set. `low` is the suggested value for `gpt-5.4-mini`. Leave empty for models without reasoning settings. |
+| `GEMINI_API_KEY` | For AI mode | Server-only. Create one in [Google AI Studio](https://aistudio.google.com/apikey). Without it, recaps and answers use the rule-based fallback. |
+| `GEMINI_MODEL` | No | Defaults to `gemini-3.5-flash-lite`: stable, supports structured output, and has a free tier. |
+| `GEMINI_THINKING_LEVEL` | No | `minimal` \| `low` \| `medium` \| `high`. The level is sent only if the configured model documents support for it. Otherwise it's skipped, with a server warning. |
 | `MATCHBRIEF_AI_RATE_LIMIT` | No | AI calls per client IP per 10 minutes, per server instance. Default 30. |
 
-The key is read only in `src/lib/ai/openai.server.ts`, a `server-only` module.
-It never reaches browser code.
+The key is read only by `src/lib/ai/gemini.server.ts`, a `server-only` module,
+so it never reaches browser code. Don't give it a `NEXT_PUBLIC_` prefix.
+
+The app reads **only `GEMINI_API_KEY`**. The SDK would otherwise prefer
+`GOOGLE_API_KEY` if both were set, so MatchBrief passes the key explicitly and
+switches Vertex AI off. `GEMINI_BASE_URL` is used only to point tests at a
+local mock; leave it unset.
+
+**Leftover OpenAI settings:** `OPENAI_*` variables from earlier versions are no
+longer read, and the OpenAI SDK has been removed. Delete them from
+`.env.local`.
 
 ## Historical replay vs a live feed
 
@@ -73,175 +83,229 @@ full file, including its result metadata, stays on the server.
 
 | | AI mode | Rule-based fallback |
 | --- | --- | --- |
-| When | `OPENAI_API_KEY` is set **and** the model's output passes every check | No key; provider error, quota/rate limit (HTTP 429) or timeout; refusal; incomplete or invalid structured output; unknown, future or mislabelled evidence; numbers written by the model; a result hinted before the chase ends; or the app's own rate limit |
-| Label in UI | `AI · <model>`, plus "· cached" and the original generation time when served from cache | `Rule-based fallback` plus the specific reason |
-| Words | Written by the model; no numbers allowed | Sentences built from calculated facts. The "why" card becomes "What the numbers say". |
-| Numbers | Rendered by the server from the facts the model selected, each labelled with its checkpoint or interval | Built into the sentences from the same calculated facts |
+| When | `GEMINI_API_KEY` is set **and** Gemini's output passes every check | Any of the triggers listed below this table |
+| Label in UI | `Gemini · <model>`. Served from cache, it adds "· cached" and the original generation time. | `Rule-based fallback`, plus the specific reason |
+| Words | Written by Gemini, with no numbers allowed | Sentences built from calculated facts. The "why" card becomes "What the numbers say". |
+| Numbers | Rendered by the server from the facts Gemini selected, each labelled with its checkpoint or interval | Built into the sentences from the same calculated facts |
 
-Having credentials is not enough to get the AI badge. It is shown only for
-model output that passed validation.
+The fallback is used when any of these happens:
+
+- no key, or an invalid key;
+- the model is unavailable;
+- a per-minute rate limit, or exhausted quota or credit;
+- a safety block;
+- an empty, cut-off, malformed or off-schema response;
+- evidence that is unknown, from the future, or mislabelled;
+- numbers the model wrote itself;
+- a result hinted at before the chase ends;
+- a timeout or server error;
+- the app's own rate limit.
+
+Having a key is not enough to get the Gemini badge. It appears only for
+output that passed validation.
 
 How the AI path works (`src/lib/ai/`):
 
 1. **Validate the request.** The browser sends only two checkpoint numbers,
-   plus the question for Q&A. The server validates them against the fixture
-   and rejects anything out of range, reversed, or carrying extra fields: a
-   score, a model, a token limit, or "facts".
-2. **Build the context from canonical data** (`context.ts`).
-   - Every calculated fact has an ID, a type, a **scope**, a value, and its
-     supporting deliveries. The scope is the checkpoint or interval it
-     describes: "as of 18.0 ov", "when you left, 10.0 ov", "10.0–18.0 ov", or
-     the whole match.
+   plus the question for Q&A. The server checks them against the fixture and
+   rejects anything that is:
+   - out of range;
+   - reversed;
+   - carrying extra fields: a score, a model, a token limit, or "facts".
+2. **Build the context** (`context.ts`) from canonical data.
+   - Every calculated fact has an ID, a type, a **scope**, a value and its
+     supporting deliveries. The scope says when the fact applies: "as of
+     18.0 ov", "when you left, 10.0 ov", "10.0–18.0 ov", or match-level.
    - Every delivery has an event ID (`E1`…`E125`) and its kinds (`six`,
      `wicket`, `wide`…).
-3. **Call the model** (`openai.server.ts`) through the OpenAI **Responses
-   API**, using the official SDK (`responses.parse` + `zodTextFormat`):
-   - strict Zod schema;
-   - `store: false`;
-   - 15 s timeout, 1 retry, 1,500 max output tokens;
-   - reasoning effort from `OPENAI_REASONING_EFFORT`;
-   - no temperature.
+3. **Call Gemini** (`gemini.server.ts`) using the official **`@google/genai`**
+   SDK's `models.generateContent`. This API is stateless: nothing is stored
+   server-side. The call uses:
+   - `responseMimeType: "application/json"` and a `responseJsonSchema`
+     generated from the Zod schemas (only keywords Gemini supports);
+   - `systemInstruction` for the rules;
+   - `maxOutputTokens: 1500`;
+   - the thinking level, if the model supports it;
+   - no tools, search or browsing.
 
-   Refusals, incomplete output, timeouts, 429s and other API errors each map
-   to their own fallback reason.
-4. **What the model returns:** **words only** (a headline and short notes),
-   plus structured references:
-   - `fact_ids`, which select canonical facts;
-   - `events: [{id, kind}]`, which point at deliveries.
-5. **Check the output** (`guards.ts`). It is rejected if:
-   - a fact ID is unknown;
-   - a cited delivery is in the future, outside the catch-up window, or not
-     what the model claims (e.g. a four cited as a "wicket");
-   - "what to watch next" uses anything other than current facts;
-   - the model's text contains any digit or number word;
-   - it hints at the result before the chase ends, including spoilers with no
-     numbers, such as "India eventually get over the line";
-   - it is over-long.
+   Timeouts and retries are bounded: the SDK's own retries are off. Each
+   attempt gets 12 s within a 25 s overall budget, and there's **at most one
+   retry**. A retry happens only for a per-minute 429 (honouring Gemini's
+   `retryDelay` if it fits the budget), a 500/503 or a network error.
+   - **Never retried:** a daily quota or exhausted credit, an invalid key or
+     model, safety blocks, and parse failures.
+   - **Error handling:** errors are classified from the HTTP status and
+     Google's error details (`API_KEY_INVALID`, `QuotaFailure` IDs,
+     `RetryInfo`), and never shown raw.
+4. **Validate the shape.** The JSON is parsed and **re-validated with Zod**.
+   The model writes **words only** (a headline and short notes), selects facts
+   with `fact_ids`, and points at deliveries with `events: [{id, kind}]`.
+5. **Run the guards** (`guards.ts`). The output is rejected if it has:
+   - unknown fact IDs;
+   - cited deliveries that are in the future, outside the catch-up window, or
+     not what the model claims (e.g. a four cited as a "wicket");
+   - a "what to watch next" that uses non-current facts;
+   - any digit or number word in the model's text;
+   - spoilers before the chase ends, including number-free ones like "India
+     eventually get over the line";
+   - over-long text.
 6. **Render the numbers.** The server renders every number from the selected
-   facts. So "31 off 12" cannot become "12 off 31", and an old equation cannot
-   be shown as the current one.
-7. **Cache only validated output.** Only validated AI output is cached, along
-   with its model and generation time.
+   facts. So "31 off 12" cannot become "12 off 31", and an old equation
+   cannot be shown as the current one.
+7. **Cache validated answers only.** The provider, model and generation time
+   are stored with each one. Cache keys include the provider, model, thinking
+   level, prompt version, fixture version, both checkpoints, the operation and
+   the question. A cached answer from another provider or configuration is
+   therefore never served as new Gemini output.
 
 These checks remove whole classes of numerical and evidence errors. They do
-**not** prove the model's free-text interpretation is right:
+**not** prove that Gemini's free-text interpretation is right. For example, an
+invented reason for a no-ball contains no numbers and no result claim, so the
+runtime checks cannot detect it. Only the live eval checks for it.
 
-- An invented reason for a no-ball contains no numbers and no result claim, so
-  the runtime checks cannot detect it. The live eval checks for it.
-- The model may know this famous match's result from training data. The
-  prompt and the spoiler check reduce, but cannot rule out, a leak.
+Gemini may also know this famous match's result from training data. The
+prompt and the spoiler check reduce the risk of that leaking, but cannot rule
+it out.
 
 ## Tests
 
 ```bash
 npm run lint
 npm run typecheck
-npm test                   # 200 unit tests (Vitest); no network, no key
-npm run test:e2e           # production build + 21 Playwright tests (mock AI + no-key)
-npm run verify:ai          # OPT-IN, REAL OpenAI: 9 model cases + 1 no-call case + 1 deliberate timeout
-npm run verify:ai:browser  # OPT-IN, REAL OpenAI in the browser: catch-up + 2 questions
+npm test                   # 221 unit tests (Vitest); no network, no key, no paid calls
+npm run test:e2e           # production build + 23 Playwright tests (Gemini mock + no-key)
+npm run verify:ai:smoke    # OPT-IN, REAL Gemini: 2 calls (one catch-up, one factual question)
+npm run verify:ai          # OPT-IN, REAL Gemini: smoke first; the rest runs only if smoke passes
+npm run verify:ai:browser  # OPT-IN, REAL Gemini in the browser: catch-up + 2 questions
 ```
 
-- **Unit tests** (`tests/unit/`) strip `OPENAI_API_KEY` and `OPENAI_BASE_URL`
-  before running. They cover:
+### Unit tests (`tests/unit/`)
+
+Before running, the unit tests remove `GEMINI_API_KEY`, `GEMINI_BASE_URL` and
+`GOOGLE_API_KEY` from the environment. They cover:
+
+- **Data and engine:**
   - fixture checksum and validation;
-  - reconciliation with the **published scorecard**: every batter, extras,
-    fall of wickets, and bowling figures;
+  - reconciliation with the **published scorecard**;
   - the final over, event by event;
-  - legal balls vs deliveries, intervals, and checkpoints;
-  - request validation and the route handlers;
-  - context leakage;
-  - grounding regressions: swapped numbers, wrong-kind events,
-    wrong-checkpoint facts, `E82`-style IDs, numbers from future metadata,
-    and number-free spoilers;
-  - the OpenAI provider through the real SDK with a fake `fetch`: success,
-    usage, refusal, incomplete output, malformed JSON, schema mismatch, and
-    HTTP 429, 500, 401, 400 and timeout;
-  - cache provenance, dedupe, and rate limiting;
-  - the offline half of the [evaluation cases](evals/cases.ts);
-  - the submission-note word count.
-- **E2E tests** (`tests/e2e/`) run against `next start`, using a local mock of
-  the Responses API (`tests/e2e/mock-openai.mjs`, connected through the SDK's
-  `OPENAI_BASE_URL`), plus a second server with no key. Beyond the core flows,
-  they cover:
-  - rewinding or moving forward while a request is in flight;
-  - refusal and incomplete-output labels;
-  - cache provenance.
-- **`npm run verify:ai`** loads `.env.local` with Node's own loader,
-  independently of Next.js. It runs each case once through the production
-  service and checks mode, status, expected facts, and forbidden claims. It
-  records latency and token usage and writes
-  `reports/ai-verification-*.json`. If `OPENAI_BASE_URL` is set to a custom
-  endpoint, the run is labelled "not a real OpenAI verification".
-- **`npm run verify:ai:browser`** builds the app, runs it with `.env.local`,
-  checks the real AI badges in the UI, and saves screenshots to `reports/`.
+  - legal balls vs deliveries;
+  - intervals and checkpoints.
+- **Requests and context:** request validation and route handlers, and context
+  leakage.
+- **Grounding regressions.**
+- **The Gemini provider**, run through the real `@google/genai` SDK with an
+  injected fake `fetch`. Cases:
+  - request shape and parsing, including usage;
+  - invalid key (400 and 401), prepay depleted (402), and missing or forbidden
+    model (404, 403);
+  - daily quota versus per-minute 429, with a single bounded retry that
+    honours `retryDelay`;
+  - 503 retried once, and a timeout;
+  - a safety block, `MAX_TOKENS`, and an empty response;
+  - malformed JSON and a schema mismatch.
+- **Config and key isolation**, including thinking-level validation.
+- **Schema compatibility:** the JSON Schema uses only keywords Gemini
+  supports.
+- **Caching:** caches are isolated by provider and config, and keep their
+  provenance.
+- **Evals and the note:** the offline half of the
+  [evaluation cases](evals/cases.ts), and the submission-note word count.
 
-**Verified status (2026-10-15).** Lint, typecheck, 200 unit tests, and 21 e2e
-tests pass.
+### E2E tests (`tests/e2e/`)
 
-**Real AI is NOT verified.** The key in `.env.local` is valid and can see
-`gpt-5.4-mini`, but every generation request returns HTTP 429
-`insufficient_quota` (`credit_balance_exhausted`). As a result, every real
-call fell back, and each fallback was correctly labelled. See
-[`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+E2E tests run `next start` against a local mock of Gemini's `generateContent`
+endpoint (`tests/e2e/mock-gemini.mjs`, reached through the real SDK via
+`GEMINI_BASE_URL`), plus a second server with no key. They cover:
+
+- the badge reading `Gemini · <model>` only for accepted answers;
+- safety, quota and empty-response fallbacks;
+- cache provenance;
+- rewinding or moving forward while a request is in flight.
+
+### `npm run verify:ai`
+
+The harness loads `.env.local` with Node's own loader, independently of
+Next.js. It then runs the production service:
+
+1. It runs the **2-case smoke test first**. If smoke fails, the remaining
+   cases are skipped, so quota isn't spent.
+2. Each case runs once, with real calls spaced 4.5 s apart for free-tier
+   per-minute limits.
+3. For each case it records:
+   - result: genuine Gemini, fallback, or no model call;
+   - grounding acceptance or rejection;
+   - latency;
+   - tokens (input, output and thinking);
+   - the failure reason.
+4. It writes `reports/ai-verification-*.json`.
+
+A custom `GEMINI_BASE_URL` makes the report say "not a real Gemini
+verification".
+
+**Verified status:** see [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+Lint, typecheck, 221 unit tests and 23 e2e tests pass. **Real Gemini
+generation is NOT verified yet**: `.env.local` had no `GEMINI_API_KEY` when the
+migration was finished.
 
 ## Deploy to Vercel
 
-1. **Set up OpenAI first.**
-   - Create a **dedicated OpenAI project** for MatchBrief, with a **project
-     API key**.
-   - Add credit.
-   - In the project's limits, set an **enforced monthly budget**. That's a
-     hard cap on spend, not just an email alert at a threshold.
+1. **Prepare a Gemini key.**
+   - In [Google AI Studio](https://aistudio.google.com/apikey), create an API
+     key in a **dedicated Google Cloud project** for MatchBrief.
+   - The free tier has per-minute and per-day limits, so it does not cover
+     unlimited public use. If you enable billing on the project, also set a
+     **budget** in Google Cloud Billing. A budget only alerts by default; you
+     can add a hard cap by also limiting the project's API quotas.
+   - Run `npm run verify:ai:smoke` locally first.
 2. **Push** this folder to a **private** GitHub repository. If the repository
    root is the parent folder, set Vercel's **Root Directory** to
    `dream11-matchbrief`.
 3. **Import the project.** In Vercel, choose **Add New → Project**, import the
-   repository, and keep the **Next.js** preset. Node.js must be 22 or newer:
-   the project setting defaults to a supported version, and `package.json`
-   declares `>=22`.
-4. **Add the environment variables** under **Settings → Environment
-   Variables** (Production):
-   - `OPENAI_API_KEY` (the project key)
-   - `OPENAI_MODEL` = `gpt-5.4-mini`
-   - `OPENAI_REASONING_EFFORT` = `low`
+   repository, and keep the **Next.js** preset. Node.js must be 22 or newer;
+   `package.json` declares `>=22`.
+4. **Set environment variables** under **Settings → Environment Variables**
+   (Production):
+   - `GEMINI_API_KEY` (required)
+   - `GEMINI_MODEL` = `gemini-3.5-flash-lite`
+   - `GEMINI_THINKING_LEVEL` = `minimal`
+   - optional: `MATCHBRIEF_AI_RATE_LIMIT`
 
-   `MATCHBRIEF_AI_RATE_LIMIT` is optional. Do **not** set `OPENAI_BASE_URL`.
-5. **Deploy.** **Redeploy after any environment-variable change**: variables
-   only apply to new deployments.
+   **Do not set** `GEMINI_BASE_URL`, `GOOGLE_API_KEY` or any `OPENAI_*`
+   variable.
+5. **Deploy.** **Redeploy after any environment-variable change.**
 
-   CLI alternative: `npx vercel`, then `npx vercel env add OPENAI_API_KEY
-   production`, then `npx vercel --prod`.
+   CLI alternative: run `npx vercel`, then
+   `npx vercel env add GEMINI_API_KEY production`, then `npx vercel --prod`.
 6. **Runtime.** The route handlers (`/api/replay`, `/api/catchup`, `/api/ask`)
    run on the default **Node.js** runtime. `/api/catchup` and `/api/ask` set
-   `maxDuration = 30`. The fixture is **imported into the server bundle**
-   (`src/lib/match/fixture.server.ts`), so it is always available on Vercel
-   and is never a public file.
-7. **Check public access.**
-   - Open the production URL in an **incognito window** (not logged in to
-     Vercel). If you get a Vercel login page, adjust **Settings → Deployment
+   `maxDuration = 30`. The fixture is **imported into the server bundle**, so
+   it is always available and never a public file.
+7. **Check public access.** This is the URL the reviewer will use.
+   - Open the production URL in an **incognito window** and on a **phone**.
+   - If you get a Vercel login page, adjust **Settings → Deployment
      Protection** so the production domain is public.
-   - Press **Catch me up** and confirm the badge says `AI · gpt-5.4-mini`. If
-     it says `Rule-based fallback`, the reason is shown underneath.
-   - Ask a question, then repeat on a phone.
+   - Press **Catch me up** and confirm `Gemini · gemini-3.5-flash-lite`.
+   - Then ask a question.
 
 ### Usage and abuse controls for a public AI endpoint
 
 The in-app cache (200 entries) and per-IP limiter (30 AI calls per 10 minutes
-by default) are **process-local**. Each serverless instance has its own copy
-and loses it on a cold start, so they are **not a distributed limit**. Before
-sharing the link:
+by default) are **process-local**. Each serverless instance has its own copy,
+and they reset on cold starts, so they are **not a distributed limit**.
 
-- **Vercel Firewall → Rate Limiting rule** on `POST` requests whose path is
-  `/api/catchup` or `/api/ask`, e.g. 20 requests per minute per IP, with
-  action deny (429). Leave `/api/replay` out: replay steps are cheap, and
-  auto-play calls it every 1.2 s.
-- **OpenAI project budget**, enforced as above, with the dedicated key only.
+Gemini's free tier also caps requests per minute and per day for the whole
+project. A shared link can exhaust it, and fans then see a labelled fallback.
+Don't promise unlimited use.
+
+- **Vercel Firewall → Rate Limiting rule** on `POST` requests to
+  `/api/catchup` or `/api/ask` (e.g. 10 per minute per IP, then deny with
+  429). Leave `/api/replay` alone: replay controls and auto-play must stay
+  unthrottled.
+- **Google Cloud:** use the dedicated project, check its quotas, and set a
+  budget if billing is enabled.
 - **Vercel function logs** show fallback reasons such as
-  `provider status 429 (insufficient_quota)`, never keys or provider error
-  bodies.
-- For real traffic, move rate limiting to a shared store (for example Redis)
-  and consider bot protection.
+  `HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDay…`. They never contain
+  keys or provider message bodies.
 
 ## Integrating an authorized live feed later
 
@@ -268,11 +332,11 @@ version would mostly change the data edges:
 data/cricsheet/          match file, manifest (sha256, pinned mirrors), NOTICE (license, provenance, transforms)
 src/lib/cricket/         pure normalization + scoreboard engine (no server, no AI)
 src/lib/match/           server-only fixture loader; client-safe replay view
-src/lib/ai/              context, prompts, schemas, guards, fallback, cache, OpenAI provider, service
+src/lib/ai/              context, prompts, schemas, guards, fallback, cache, Gemini provider, service
 src/app/api/             replay, catchup, ask route handlers
 src/components/          the single-page UI
 evals/cases.ts           evaluation cases (offline + live)
-tests/                   unit, e2e (mock Responses API), live + live-browser (real API, opt-in)
+tests/                   unit, e2e (Gemini mock), live + live-browser (real Gemini, opt-in)
 docs/                    DECISIONS, DEMO, SUBMISSION, VERIFICATION
 ```
 

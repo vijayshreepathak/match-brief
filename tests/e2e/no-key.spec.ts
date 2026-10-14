@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// The same app with no OPENAI_API_KEY: everything still works, and nothing pretends to be AI.
+// The same app with no GEMINI_API_KEY: everything still works, and nothing pretends to be AI.
 
 test("without an API key, recaps and answers are labelled rule-based fallbacks", async ({ page }) => {
   await page.goto("/");
@@ -10,7 +10,7 @@ test("without an API key, recaps and answers are labelled rule-based fallbacks",
   await expect(recap).toContainText("AI is not configured on this server");
   await expect(recap).toContainText("What the numbers say");
   await expect(recap).toContainText("India need 31 off 12 balls (15.50 per over) with 6 wickets in hand.");
-  await expect(recap).not.toContainText("AI ·");
+  await expect(recap).not.toContainText("Gemini ·");
 
   await page.getByRole("button", { name: "Who will win?" }).click();
   const item = page.getByTestId("qa-item").first();

@@ -21,7 +21,9 @@ const recapOutput: CatchUpOutput = {
 function fakeModel(respond: (req: ModelRequest<unknown>) => unknown) {
   const calls: ModelRequest<unknown>[] = [];
   const model: StructuredModel = {
+    provider: "FakeProvider",
     model: "fake-model",
+    configKey: "fake|fake-model",
     async generate<T>(req: ModelRequest<T>) {
       calls.push(req as ModelRequest<unknown>);
       const parsed = respond(req as ModelRequest<unknown>);
@@ -54,6 +56,7 @@ describe("catch-up", () => {
     expect(res.mode).toBe("fallback");
     expect(res.fallbackReason).toBe("missing_config");
     expect(res.model).toBeNull();
+    expect(res.provider).toBeNull();
     expect(res.recap.whyItMatters.kind).toBe("calculated");
     expect(res.recap.watchNext.text).toBe("India need 31 off 12 balls (15.50 per over) with 6 wickets in hand.");
   });
@@ -61,10 +64,15 @@ describe("catch-up", () => {
   it.each([
     ["timeout", new ProviderError("timeout", "slow"), "timeout"],
     ["provider error", new ProviderError("provider_error", "500"), "provider_error"],
-    ["provider quota/rate limit", new ProviderError("provider_rate_limited", "429"), "provider_rate_limited"],
+    ["a per-minute rate limit", new ProviderError("rate_limited", "429"), "provider_rate_limited"],
     ["invalid structured output", new ProviderError("invalid_output", "bad json"), "invalid_output"],
-    ["a refusal", new ProviderError("refusal", "refused"), "model_refusal"],
-    ["incomplete output", new ProviderError("incomplete", "max_output_tokens"), "incomplete_output"],
+    ["incomplete output", new ProviderError("incomplete", "MAX_TOKENS"), "incomplete_output"],
+    ["a safety block", new ProviderError("safety_blocked", "SAFETY"), "safety_blocked"],
+    ["an empty response", new ProviderError("empty_response", "no candidates"), "empty_response"],
+    ["malformed JSON", new ProviderError("malformed_json", "bad json"), "malformed_json"],
+    ["an invalid API key", new ProviderError("invalid_api_key", "401"), "invalid_api_key"],
+    ["an unavailable model", new ProviderError("model_unavailable", "404"), "model_unavailable"],
+    ["exhausted quota", new ProviderError("quota_exhausted", "429 PerDay"), "quota_exhausted"],
     ["unexpected exception", new Error("boom"), "provider_error"],
   ])("falls back on %s", async (_name, error, reason) => {
     const { model } = fakeModel(() => {
@@ -116,6 +124,22 @@ describe("cost controls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("never serves a cached answer from a different provider or configuration", async () => {
+    const cache = new BoundedCache<never>(50);
+    const a = fakeModel(() => recapOutput);
+    const b = fakeModel(() => recapOutput);
+    const providerB: StructuredModel = { ...b.model, provider: "OtherProvider", configKey: "other|fake-model" };
+    const request = { lastSeenSeq: over10, viewingSeq: over18 };
+    const first = await runCatchUp(chase, request, deps(a.model, { cache }));
+    const second = await runCatchUp(chase, request, deps(providerB, { cache }));
+    expect(b.calls).toHaveLength(1); // not served from provider A's cache entry
+    expect(first.provider).toBe("FakeProvider");
+    expect(second).toMatchObject({ provider: "OtherProvider", cached: false });
+    // Same provider and configuration again: cached, with the original provenance.
+    const third = await runCatchUp(chase, request, deps(a.model, { cache }));
+    expect(third).toMatchObject({ cached: true, provider: "FakeProvider", model: "fake-model", generatedAt: first.generatedAt });
+  });
+
   it("does not cache fallbacks, so a later retry can succeed", async () => {
     let fail = true;
     const { model, calls } = fakeModel(() => {
@@ -150,12 +174,14 @@ describe("cost controls", () => {
   });
 
   it("builds cache keys from every input that changes the answer", () => {
-    const base = { fixtureVersion: "v1", model: "m", op: "ask" as const, lastSeenSeq: 60, viewingSeq: 110, question: "Who is batting?" };
+    const base = { fixtureVersion: "v1", modelConfig: "gemini|m|thinking=minimal", op: "ask" as const, lastSeenSeq: 60, viewingSeq: 110, question: "Who is batting?" };
     const key = cacheKey(base);
     expect(cacheKey({ ...base, question: "  who IS   batting? " })).toBe(key);
     for (const change of [
       { fixtureVersion: "v2" },
-      { model: "other" },
+      { modelConfig: "gemini|other|thinking=minimal" },
+      { modelConfig: "gemini|m|thinking=low" },
+      { modelConfig: "otherprovider|m|thinking=minimal" },
       { op: "catchup" as const },
       { lastSeenSeq: 61 },
       { viewingSeq: 111 },

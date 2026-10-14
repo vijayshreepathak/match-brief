@@ -1,5 +1,5 @@
 import { getChase } from "@/lib/match/fixture.server";
-import { getOpenAIModel } from "@/lib/ai/openai.server";
+import { getGeminiModel } from "@/lib/ai/gemini.server";
 import { runCatchUp } from "@/lib/ai/service";
 import { CatchUpRequestSchema, clientKey, handle, json, parseOrThrow, readJsonBody } from "@/lib/http";
 
@@ -11,7 +11,7 @@ export function POST(request: Request) {
   return handle(async () => {
     const body = parseOrThrow(CatchUpRequestSchema, await readJsonBody(request));
     const response = await runCatchUp(getChase(), body, {
-      model: getOpenAIModel(),
+      model: getGeminiModel(),
       clientKey: clientKey(request),
       log: (message) => console.warn(message),
     });

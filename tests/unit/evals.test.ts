@@ -67,7 +67,9 @@ describe("unchanged-checkpoint case", () => {
     const c = EVAL_CASES.find((e) => e.id === "unchanged-checkpoint")!;
     let calls = 0;
     const model: StructuredModel = {
+      provider: "Test",
       model: "never-called",
+      configKey: "test",
       async generate() {
         calls += 1;
         throw new Error("should not be called");

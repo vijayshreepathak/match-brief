@@ -148,7 +148,7 @@ function Answer({ data, view }: { data: AskResponse; view: ReplayView }) {
     <div className="mt-2 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <ModeBadge mode={data.mode} model={data.model} fallbackReason={data.fallbackReason} cached={data.cached} generatedAt={data.generatedAt} />
+          <ModeBadge mode={data.mode} provider={data.provider} model={data.model} fallbackReason={data.fallbackReason} cached={data.cached} generatedAt={data.generatedAt} />
           <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700" data-testid="answer-status">
             {STATUS_TEXT[data.answer.status]}
           </span>

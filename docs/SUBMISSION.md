@@ -1,9 +1,13 @@
 # Submission
 
-> **Status: NOT READY TO SUBMIT.** Real AI responses have not been verified,
-> because the OpenAI account behind the key has no credit (HTTP 429
-> `insufficient_quota`). Nothing is deployed yet either. See
-> `docs/VERIFICATION.md`.
+> **Status: NOT READY TO SUBMIT.**
+>
+> - The app now uses Google Gemini, but **genuine Gemini answers have not been
+>   verified yet**: there was no `GEMINI_API_KEY` in `.env.local` when the
+>   migration finished.
+> - **Nothing is deployed.**
+>
+> See `docs/VERIFICATION.md`.
 
 ## Working artifact
 
@@ -28,8 +32,8 @@ explains them in words. It sees only deliveries up to the replay point and
 says when information, like an injury, isn't in the data. If AI is
 unavailable, a labelled rule-based summary appears instead.
 
-**AI tools:** OpenAI GPT-5.4 mini via the Responses API with Structured
-Outputs and Zod validation. Built with Claude Code as a coding assistant.
+**AI tools:** Google Gemini API (gemini-3.5-flash-lite) with structured JSON
+output and Zod validation. Built with Claude Code as a coding assistant.
 
 **Disclosure:** historical replay, not live data; independent prototype, not
 affiliated with Dream11.
@@ -37,14 +41,17 @@ affiliated with Dream11.
 
 ## Before you submit (not part of the note)
 
-- [ ] Add credit to the OpenAI account that owns the key. Use a dedicated
-      project with an enforced monthly budget (README → Deploy).
+- [ ] Add `GEMINI_API_KEY` to `.env.local`. Use a key from a dedicated Google
+      Cloud project.
+- [ ] Run `npm run verify:ai:smoke`. Both cases must be accepted Gemini
+      answers.
 - [ ] Run `npm run verify:ai` once. Every `ai_required` and `honest_refusal`
-      case must pass as an accepted AI response.
-- [ ] Run `npm run verify:ai:browser` once. Catch-up and a question must both
-      show `AI · gpt-5.4-mini`, not "Rule-based fallback".
+      case must pass.
+- [ ] Run `npm run verify:ai:browser` once. Both the catch-up and the question
+      must show `Gemini · gemini-3.5-flash-lite`.
 - [ ] Deploy to Vercel (README → Deploy). Open the production URL in an
-      incognito window, press **Catch me up**, and confirm the AI badge.
+      incognito window and on a phone, press **Catch me up**, and confirm the
+      Gemini badge.
 - [ ] Replace the URL placeholder above with the verified production URL.
 - [ ] In the form, upload a document containing the link and the note above.
 - [ ] If you edit the note, run `npm test`: a test fails above 200 words.

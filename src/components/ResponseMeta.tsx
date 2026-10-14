@@ -2,12 +2,14 @@ import { FALLBACK_REASON_TEXT, type AsOf, type BoundFact, type FallbackReason, t
 
 export function ModeBadge({
   mode,
+  provider,
   model,
   fallbackReason,
   cached = false,
   generatedAt = null,
 }: {
   mode: ResponseMode;
+  provider: string | null;
   model: string | null;
   fallbackReason: FallbackReason | null;
   cached?: boolean;
@@ -17,7 +19,7 @@ export function ModeBadge({
     return (
       <span className="inline-flex flex-col gap-1">
         <span className="inline-flex w-fit items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-900">
-          AI · {model}
+          {provider} · {model}
           {cached ? " · cached" : ""}
         </span>
         <span className="text-xs text-slate-600" data-testid="provenance">

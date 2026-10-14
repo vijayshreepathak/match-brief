@@ -110,7 +110,7 @@ function RecapResult({ data, view }: { data: CatchUpResponse; view: ReplayView }
   return (
     <div className="space-y-3" data-testid="recap">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <ModeBadge mode={data.mode} model={data.model} fallbackReason={data.fallbackReason} cached={data.cached} generatedAt={data.generatedAt} />
+        <ModeBadge mode={data.mode} provider={data.provider} model={data.model} fallbackReason={data.fallbackReason} cached={data.cached} generatedAt={data.generatedAt} />
         <AsOfLabel asOf={data.asOf} currentViewingSeq={view.viewing.seq} showWindow />
       </div>
       <h3 className="text-xl font-bold text-slate-900">{recap.headline}</h3>

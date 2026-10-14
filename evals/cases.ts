@@ -9,7 +9,7 @@ import type { AnswerStatus, ResponseMode } from "@/lib/ai/types";
 // guards reject. This does NOT evaluate a real model.
 //
 // Live (npm run verify:ai): sends each case through the production service to the
-// configured OpenAI model and checks the real output (AI wording plus the fact
+// configured Gemini model and checks the real output (AI wording plus the fact
 // statements the app renders) for expected facts and forbidden claims.
 //
 // Categories:

@@ -16,6 +16,7 @@ describe("submission note", () => {
 
   it("discloses the historical replay and names the AI tools", () => {
     expect(note).toMatch(/historical replay, not live data/);
-    expect(note).toMatch(/GPT-5\.4 mini/);
+    expect(note).toMatch(/Gemini API \(gemini-3\.5-flash-lite\)/);
+    expect(note).not.toMatch(/OpenAI|GPT/);
   });
 });

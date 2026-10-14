@@ -165,34 +165,59 @@ request and response carries its `asOf`.
 ## 11. Cost controls
 
 - **Cache:** an LRU of 200 entries holding validated AI output only. The key
-  includes the fixture version, prompt version, model, reasoning effort,
-  operation, both checkpoints, and the normalized question.
+  includes the fixture version, prompt version, provider/model/thinking-level
+  `configKey`, operation, both checkpoints, and the normalized question.
 - **In-flight dedupe:** identical concurrent requests share one provider call.
 - **Rate limiter:** per IP, fixed window. It's process-local and documented as
   non-durable; the README lists the deployment-level controls still needed.
-- **Provider call limits:** 15 s timeout, 1 retry, 1,500 max output tokens,
-  `store: false`.
+- **Provider call limits:** 12 s per attempt within a 25 s budget, at most one
+  retry (transient errors only), 1,500 max output tokens, minimal thinking, and
+  the stateless `generateContent` API.
 - **Request limits:** body limit of 4 KB, questions up to 280 characters.
 
-## 12. Model settings
+## 12. Model settings (Gemini)
 
-The default model is `gpt-5.4-mini`. Its model page lists the Responses API and
-Structured Outputs, and reasoning effort `none` (default) / `low` / `medium` /
-`high` / `xhigh`.
+**Model.** The default is `gemini-3.5-flash-lite`. Its model page (checked
+2026-10-15) lists it as **stable**, with structured outputs and thinking. The
+pricing page lists a **free tier** for input and output. That tier's data
+"Used to improve our products" is "Yes", so fan questions sent on the free
+tier may be used by Google.
 
-- **Reasoning effort** is sent only when `OPENAI_REASONING_EFFORT` is set
-  (`.env.example` suggests `low`), so other models still work.
-- **Temperature isn't sent:** the model page doesn't confirm it's supported.
+**Thinking.** The thinking docs list `minimal`, `low`, `medium` and `high` for
+this model, with `minimal` as the default. `GEMINI_THINKING_LEVEL` is sent only
+if the configured model documents that level. The app keeps a small table taken
+from those docs. For an unlisted model, or an unsupported level, nothing is
+sent and the server logs a single warning.
+
+**API and settings.**
+
+- **API:** the official `@google/genai` SDK, `models.generateContent`. The
+  current docs also show the newer Interactions API. `generateContent` is still
+  a documented API-reference method, and it is stateless, so nothing is stored
+  server-side.
+- **Structured output:** `responseMimeType: "application/json"` plus a
+  `responseJsonSchema` generated from the Zod schemas, with `$schema` removed.
+  A test checks that only documented keywords are used. The output is
+  re-validated with Zod.
+- **Not sent:** temperature and tools. Answers must come only from the bundled
+  match context.
 
 ## 13. Testing without a test mode in app code
 
-E2E runs the production build against a small mock of the Responses API,
-connected through the SDK's standard `OPENAI_BASE_URL`. The real SDK request
-and parsing path is exercised, and special phrases in the question trigger
-errors, bad evidence, or slow replies. A second server runs with a whitespace
-key to test the no-key path; whitespace is used because empty environment
-values can be dropped on Windows. Real-model checks are a separate, opt-in
-command.
+**E2E.** E2E tests run the production build against a small mock of Gemini's
+REST `generateContent` endpoint, reached through the real SDK by setting the
+server-only `GEMINI_BASE_URL`. That exercises the real SDK request and parsing
+path. Special phrases in the question trigger errors, safety blocks, quota
+errors, empty or slow replies, and bad evidence.
+
+**No-key path.** A second server runs with a whitespace key to cover the
+no-key path. Whitespace is used because empty environment values can be
+dropped on Windows.
+
+**Unit tests.** These inject a fake `fetch` into the real SDK
+(`httpOptions.fetch`).
+
+**Real-model checks.** These are separate, opt-in commands.
 
 ## 14. Scaffold choices
 
@@ -201,8 +226,8 @@ command.
 - **Turned off:** the template's experimental `cacheComponents` and
   `partialPrefetching`, to keep standard, explainable caching.
 - **Removed:** Google Fonts, so builds don't depend on the network.
-- **Upgraded:** `@types/node` to 22, because Vitest 5 and the OpenAI SDK both
-  need Node 22+.
+- **Upgraded:** `@types/node` to 22 (Vitest 5 needs it), and `engines.node` is
+  `>=22`.
 
 ## 15. Deliberately not built
 
@@ -215,25 +240,42 @@ command.
 
 ## 16. Each provider failure gets its own explicit, honest label
 
-Each provider failure maps to its own fallback reason, shown to the fan in
-plain words:
+**How errors are read.** Gemini errors don't mean the same thing as OpenAI's.
+The SDK raises `ApiError`, carrying the HTTP status, with Google's error JSON
+in the message. MatchBrief parses that JSON privately to get the RPC status,
+`ErrorInfo.reason`, `QuotaFailure` quota IDs and `RetryInfo.retryDelay`. It
+never shows the raw text.
 
-- refusal → `model_refusal`
-- `status: "incomplete"` → `incomplete_output`
-- SDK timeout → `timeout`
-- HTTP 429 → `provider_rate_limited`. It covers both rate limits and an
-  exhausted credit balance, and it was the first real failure seen.
-- other API errors → `provider_error`
-- JSON or schema failures → `invalid_output`
+| Situation | Fallback reason | Retried? |
+| --- | --- | --- |
+| No `GEMINI_API_KEY` | `missing_config` | no call made |
+| 401, or 400 with `API_KEY_INVALID` | `invalid_api_key` | no |
+| 402 (prepay depleted), or billing problems | `quota_exhausted` | no |
+| 429 with a per-day quota ID (incl. a free tier with no quota) | `quota_exhausted` | no |
+| 429 per-minute rate limit | `provider_rate_limited` | once, after `retryDelay`, only if it fits the 25 s budget |
+| 403 / 404 | `model_unavailable` | no |
+| `promptFeedback.blockReason`, or finish reason SAFETY / RECITATION / … | `safety_blocked` | no |
+| finish reason `MAX_TOKENS` | `incomplete_output` | no |
+| no candidates or empty text | `empty_response` | no |
+| text that is not JSON | `malformed_json` | no |
+| JSON that fails the Zod schema | `invalid_output` | no |
+| fails the grounding guards | `invalid_evidence` / `ungrounded_output` | no |
+| our 12 s abort, or 504 | `timeout` | no |
+| 500 / 503 / network error | `provider_error` | once |
 
-Server logs record the HTTP status and OpenAI error code, never the response
-body or key. Provider handling is tested through the real SDK with a fake
-`fetch`.
+**Retry limits.** The SDK's built-in retries (5 attempts by default, with
+delays up to 60 s) are switched off. The request never makes more than two
+attempts, and nothing switches models silently.
 
-**Cache provenance.** A cached AI answer keeps its model and original
-generation time, and the UI shows "· cached" with that time. Cache keys
-include both checkpoints, so a cached answer can't describe a different
-moment.
+**Logs.** Server logs record a label such as `HTTP 429 RESOURCE_EXHAUSTED
+GenerateRequestsPerDay…`, never a provider message body or the key.
+
+**Cache provenance.** A cached AI answer keeps its provider, model and original
+generation time, and the UI shows "· cached" with that time. Cache keys include
+the provider/model/thinking-level `configKey`, the prompt and fixture versions,
+both checkpoints, the operation and the question. So a cached answer can't
+describe a different moment, or pass as output from another provider or
+configuration.
 
 ## 17. Known dependency finding, with no safe fix
 
@@ -256,3 +298,38 @@ version exists** (3.0.3 is the latest).
   - keep CI job timeouts;
   - re-run `npm audit` and upgrade `eslint-config-next` when a release drops
     the vulnerable chain or `braces` ships a fix.
+
+## 18. Migration from OpenAI to Google Gemini (2026-10-15)
+
+**Why we switched.** OpenAI was blocked: the account had no credit (HTTP 429
+`insufficient_quota`). Gemini is now the **only** runtime AI provider.
+
+**What changed (deliberately narrow):**
+
+- One provider adapter (`src/lib/ai/gemini.server.ts`) replaces
+  `openai.server.ts` behind the existing `StructuredModel` contract.
+- That contract now also carries `provider` and a cache `configKey`.
+- **Unchanged:**
+  - routes and request/response shapes; responses only gained a `provider`
+    field;
+  - context building, fact scoping, guards, fallback text, caching and dedupe;
+  - all cricket data and scoring.
+- **Dependencies:** `openai` was uninstalled after confirming that no runtime
+  or test code imports it. `@google/genai` 2.29.1 was added. The deprecated
+  `@google/generative-ai` and OpenAI-compatibility adapters were not used.
+
+**Configuration.**
+
+- **Variables:** `GEMINI_API_KEY`, `GEMINI_MODEL` (default
+  `gemini-3.5-flash-lite`), `GEMINI_THINKING_LEVEL` (default suggestion
+  `minimal`) and `MATCHBRIEF_AI_RATE_LIMIT`.
+- **Key selection is explicit.** `GOOGLE_API_KEY`, Vertex flags and
+  `OPENAI_*` are ignored, so another credential can't be picked up by
+  accident.
+
+**Verification is opt-in and quota-aware:**
+
+- `verify:ai:smoke` makes 2 calls.
+- `verify:ai` runs the smoke test first and runs the rest only if it passes.
+- Real calls are spaced 4.5 s apart.
+- Results from a mock endpoint are never labelled "genuine Gemini".

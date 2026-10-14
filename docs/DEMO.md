@@ -2,10 +2,13 @@
 
 **Before the demo:**
 
-- Run `npm run verify:ai` (or press **Catch me up** once on the deployed URL)
-  and confirm the badge reads `AI · gpt-5.4-mini`. If it reads
-  `Rule-based fallback`, the reason underneath tells you what to fix first. On
-  2026-10-15 the reason was an OpenAI account with no credit.
+- Run `npm run verify:ai:smoke` (2 Gemini calls), or press **Catch me up**
+  once on the deployed URL. Confirm the badge reads
+  `Gemini · gemini-3.5-flash-lite`. If it reads `Rule-based fallback` instead,
+  the reason underneath tells you what to fix first, e.g. a missing key or a
+  used-up free-tier quota.
+- Don't rehearse dozens of AI calls on the free tier just before the demo: its
+  per-minute and daily limits are shared by the whole project.
 - AI wording varies from run to run. The numbers below come from the engine
   and will not change.
 

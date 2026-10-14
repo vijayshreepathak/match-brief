@@ -12,21 +12,37 @@ export interface ModelRequest<T> {
 export interface ModelUsage {
   inputTokens: number;
   outputTokens: number;
-  reasoningTokens: number | null;
+  thinkingTokens: number | null;
 }
 
 export interface ModelResult<T> {
   parsed: T;
+  /** Model version reported by the provider. */
   model: string;
   usage: ModelUsage | null;
 }
 
 export interface StructuredModel {
+  /** Display name of the provider, e.g. "Gemini". */
+  readonly provider: string;
   readonly model: string;
+  /** Every provider setting that can change an answer (model, thinking level...). Part of each cache key. */
+  readonly configKey: string;
   generate<T>(request: ModelRequest<T>): Promise<ModelResult<T>>;
 }
 
-export type ProviderFailure = "timeout" | "provider_error" | "provider_rate_limited" | "invalid_output" | "refusal" | "incomplete";
+export type ProviderFailure =
+  | "timeout"
+  | "provider_error"
+  | "rate_limited"
+  | "quota_exhausted"
+  | "invalid_api_key"
+  | "model_unavailable"
+  | "safety_blocked"
+  | "empty_response"
+  | "incomplete"
+  | "malformed_json"
+  | "invalid_output";
 
 export class ProviderError extends Error {
   constructor(

@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Runs against a production build (`npm run test:e2e` builds first).
 // Two app servers share one build: one with AI pointed at a local mock of the
-// OpenAI Responses API, one with no API key at all.
+// Gemini generateContent API, one with no API key at all.
 const MOCK = 4311;
 const AI = 3310;
 const NO_KEY = 3311;
@@ -15,18 +15,18 @@ export default defineConfig({
   use: { trace: "retain-on-failure" },
   webServer: [
     {
-      command: "node tests/e2e/mock-openai.mjs",
+      command: "node tests/e2e/mock-gemini.mjs",
       url: `http://127.0.0.1:${MOCK}/health`,
-      env: { MOCK_OPENAI_PORT: String(MOCK) },
+      env: { MOCK_GEMINI_PORT: String(MOCK) },
     },
     {
       command: `npx next start -p ${AI}`,
       url: `http://127.0.0.1:${AI}`,
       env: {
-        OPENAI_API_KEY: "sk-test-not-a-real-key",
-        OPENAI_BASE_URL: `http://127.0.0.1:${MOCK}/v1`,
-        OPENAI_MODEL: "mock-model",
-        OPENAI_REASONING_EFFORT: "",
+        GEMINI_API_KEY: "test-key-not-real",
+        GEMINI_BASE_URL: `http://127.0.0.1:${MOCK}`,
+        GEMINI_MODEL: "mock-gemini",
+        GEMINI_THINKING_LEVEL: "minimal",
         MATCHBRIEF_AI_RATE_LIMIT: "1000",
       },
     },
@@ -34,7 +34,7 @@ export default defineConfig({
       command: `npx next start -p ${NO_KEY}`,
       url: `http://127.0.0.1:${NO_KEY}`,
       // Whitespace counts as "not configured" and, unlike an empty value, survives on Windows.
-      env: { OPENAI_API_KEY: " ", MATCHBRIEF_AI_RATE_LIMIT: "1000" },
+      env: { GEMINI_API_KEY: " ", MATCHBRIEF_AI_RATE_LIMIT: "1000" },
     },
   ],
   projects: [

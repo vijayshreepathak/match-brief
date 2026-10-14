@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Desktop flows against the app with AI pointed at the mock Responses API.
+// Desktop flows against the app with Gemini pointed at the local mock (tests/e2e/mock-gemini.mjs).
 
 async function ask(page: Page, question: string) {
   await page.getByLabel("Your question about the match").fill(question);
@@ -22,7 +22,7 @@ test("shows the replay label, attribution and the default mid-chase checkpoint",
 test("catch-up shows an AI recap whose evidence chips open the right items", async ({ page }) => {
   await page.getByRole("button", { name: "Catch me up" }).click();
   const recap = page.getByTestId("recap");
-  await expect(recap).toContainText("AI · mock-model");
+  await expect(recap).toContainText("Gemini · mock-gemini");
   await expect(recap.getByTestId("as-of")).toHaveText("As of 18.0 ov · 129/4 · since 10.0 ov · 45/4");
 
   await recap.locator('[data-evidence-chip="F_INT_RUNS"]').click();
@@ -43,7 +43,7 @@ test("a double click sends a single catch-up request", async ({ page }) => {
     if (r.url().endsWith("/api/catchup")) requests += 1;
   });
   await page.getByRole("button", { name: "Catch me up" }).dblclick();
-  await expect(page.getByTestId("recap")).toContainText("AI · mock-model");
+  await expect(page.getByTestId("recap")).toContainText("Gemini · mock-gemini");
   expect(requests).toBe(1);
 });
 
@@ -55,7 +55,7 @@ test("the catch-up button works from the keyboard", async ({ page }) => {
 
 test("advancing marks the recap as stale and rewinding clears it", async ({ page }) => {
   await page.getByRole("button", { name: "Catch me up" }).click();
-  await expect(page.getByTestId("recap")).toContainText("AI · mock-model");
+  await expect(page.getByTestId("recap")).toContainText("Gemini · mock-gemini");
 
   await page.getByRole("button", { name: "Next ball" }).click();
   await expect(page.getByTestId("replay-position")).toContainText("delivery 111");
@@ -91,7 +91,7 @@ test("next over moves a whole over and the replay stops at the end of the chase"
 test("a suggested question returns an AI answer tagged with its checkpoint", async ({ page }) => {
   await page.getByRole("button", { name: "What do India need from here?" }).click();
   const item = page.getByTestId("qa-item").first();
-  await expect(item).toContainText("AI · mock-model");
+  await expect(item).toContainText("Gemini · mock-gemini");
   await expect(item.getByTestId("as-of")).toHaveText("As of 18.0 ov · 129/4");
   await item.locator('[data-evidence-chip="F_SCORE"]').click();
   await expect(item.locator('[data-evidence-item="F_SCORE"]')).toContainText("India 129/4 after 18.0 overs");
@@ -122,7 +122,7 @@ test("a provider error is shown as a labelled rule-based fallback", async ({ pag
   const item = page.getByTestId("qa-item").first();
   await expect(item).toContainText("Rule-based fallback", { timeout: 15_000 });
   await expect(item).toContainText("The AI provider returned an error.");
-  await expect(item).not.toContainText("AI · mock-model");
+  await expect(item).not.toContainText("Gemini · mock-gemini");
 });
 
 test("an answer citing unknown evidence is rejected in favour of the fallback", async ({ page }) => {
@@ -169,11 +169,20 @@ test("moving forward while a catch-up is in flight keeps its original checkpoint
   await expect(recap.getByText("Evidence (")).toContainText("50 deliveries in window");
 });
 
-test("a model refusal is shown as a labelled fallback", async ({ page }) => {
-  await ask(page, "mock:refusal What is the score?");
-  const item = page.getByTestId("qa-item").first();
-  await expect(item).toContainText("Rule-based fallback");
-  await expect(item).toContainText("The AI model declined to answer.");
+test.describe("Gemini failures are labelled fallbacks, never Gemini answers", () => {
+  for (const [trigger, reason] of [
+    ["mock:safety", "The AI provider blocked the response."],
+    ["mock:quota", "quota or credit for this project is used up"],
+    ["mock:empty", "The AI provider returned an empty response."],
+  ] as const) {
+    test(trigger, async ({ page }) => {
+      await ask(page, `${trigger} What is the score?`);
+      const item = page.getByTestId("qa-item").first();
+      await expect(item).toContainText("Rule-based fallback");
+      await expect(item).toContainText(reason);
+      await expect(item).not.toContainText("Gemini ·");
+    });
+  }
 });
 
 test("an incomplete model response is shown as a labelled fallback", async ({ page }) => {
@@ -187,10 +196,10 @@ test("a repeated question is served from cache and says so", async ({ page }) =>
   const question = `How many wides so far? (${Date.now()})`;
   await ask(page, question);
   const first = page.getByTestId("qa-item").first();
-  await expect(first).toContainText("AI · mock-model");
+  await expect(first).toContainText("Gemini · mock-gemini");
   await expect(first).not.toContainText("cached");
   await ask(page, question);
   const second = page.getByTestId("qa-item").first();
-  await expect(second).toContainText("AI · mock-model · cached");
+  await expect(second).toContainText("Gemini · mock-gemini · cached");
   await expect(second.getByTestId("provenance")).toContainText("Cached answer first generated at");
 });

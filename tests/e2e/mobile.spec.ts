@@ -13,12 +13,12 @@ test("mobile layout has no horizontal overflow and the core controls work", asyn
 
   await page.getByRole("button", { name: "Catch me up" }).click();
   const recap = page.getByTestId("recap");
-  await expect(recap).toContainText("AI · mock-model");
+  await expect(recap).toContainText("Gemini · mock-gemini");
   await recap.locator('[data-evidence-chip="F_INT_RUNS"]').click();
   await expect(recap.locator('[data-evidence-item="F_INT_RUNS"]')).toBeInViewport();
 
   await page.getByRole("button", { name: "How many extras have been conceded?" }).click();
-  await expect(page.getByTestId("qa-item").first()).toContainText("AI · mock-model");
+  await expect(page.getByTestId("qa-item").first()).toContainText("Gemini · mock-gemini");
 
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 });

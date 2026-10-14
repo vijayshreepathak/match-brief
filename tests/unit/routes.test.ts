@@ -8,11 +8,11 @@ import { GET as replayGet } from "@/app/api/replay/route";
 
 let savedKey: string | undefined;
 beforeEach(() => {
-  savedKey = process.env.OPENAI_API_KEY;
-  delete process.env.OPENAI_API_KEY;
+  savedKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
 });
 afterEach(() => {
-  if (savedKey !== undefined) process.env.OPENAI_API_KEY = savedKey;
+  if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
 });
 
 function post(body: unknown, raw?: string) {
@@ -32,7 +32,7 @@ describe("POST /api/catchup", () => {
   it("returns a labelled fallback without an API key", async () => {
     const { status, body } = await call(catchupPost, post({ lastSeenSeq: 60, viewingSeq: 110 }));
     expect(status).toBe(200);
-    expect(body).toMatchObject({ ok: true, mode: "fallback", fallbackReason: "missing_config", model: null });
+    expect(body).toMatchObject({ ok: true, mode: "fallback", fallbackReason: "missing_config", provider: null, model: null });
   });
 
   it.each([
@@ -43,7 +43,7 @@ describe("POST /api/catchup", () => {
     ["string", { lastSeenSeq: "0", viewingSeq: 60 }, "invalid_request"],
     ["missing field", { viewingSeq: 60 }, "invalid_request"],
     ["browser-supplied score", { lastSeenSeq: 0, viewingSeq: 60, score: "200/0" }, "invalid_request"],
-    ["browser-chosen model", { lastSeenSeq: 0, viewingSeq: 60, model: "gpt-5.4" }, "invalid_request"],
+    ["browser-chosen model", { lastSeenSeq: 0, viewingSeq: 60, model: "gemini-3.8-flash" }, "invalid_request"],
     ["browser-chosen token limit", { lastSeenSeq: 0, viewingSeq: 60, max_output_tokens: 100000 }, "invalid_request"],
     ["browser-supplied facts", { lastSeenSeq: 0, viewingSeq: 60, facts: [{ id: "F_SCORE", value: "200/0" }] }, "invalid_request"],
   ])("rejects %s checkpoints", async (_name, body, code) => {
