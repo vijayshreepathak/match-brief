@@ -13,11 +13,14 @@
     "verify:ai": "vitest run --config vitest.live.config.mts",
     "data:import": "node scripts/import-cricsheet.mjs",
     "verify:ai:browser": "next build && playwright test --config playwright.live.config.ts",
-    "verify:ai:smoke": "vitest run --config vitest.live.config.mts -t smoke"
+    "verify:ai:smoke": "vitest run --config vitest.live.config.mts -t smoke",
+    "screenshots": "playwright test --config playwright.screenshots.config.ts"
   },
   "dependencies": {
     "@google/genai": "^2.29.1",
+    "lucide-react": "^1.57.0",
     "next": "16.4.0",
+    "next-themes": "^0.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
