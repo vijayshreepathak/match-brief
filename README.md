@@ -76,8 +76,6 @@ as `mock-gemini`.
 | ![Catch-up and answer with evidence open, day](docs/screenshots/after-desktop-1366-light-populated-full.jpg) | ![Catch-up and answer with evidence open, night](docs/screenshots/after-desktop-1366-dark-populated-full.jpg) |
 | ![Mobile, day, 390×844](docs/screenshots/after-mobile-390-light.jpg) | ![Mobile, night, 390×844](docs/screenshots/after-mobile-390-dark.jpg) |
 
-Before the refresh (submitted version, 1366×768):
-![Desktop before the UI refresh](docs/screenshots/before-desktop-1366-light.jpg)
 
 ## High-level design
 
